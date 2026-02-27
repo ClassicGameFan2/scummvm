@@ -320,7 +320,7 @@ Common::Error TwinEEngine::run() {
 	int32 h = originalHeight();
 	const bool highRes = ConfMan.getBool("usehighres");
 	if (highRes) {
-		w = 1024;
+		w = 1366;
 		h = 768;
 	}
 
