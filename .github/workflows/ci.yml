@@ -17,10 +17,12 @@ jobs:
             arch: x86
             configFlags: --enable-discord --enable-faad --enable-gif --enable-mikmod --enable-mpeg2 --enable-vpx
             useNasm: 'true'
+            buildArtifacts: 'true'
           - platform: x64
             arch: x64
             triplet: x64-windows
             configFlags: --enable-discord --enable-faad --enable-gif --enable-mikmod --enable-mpeg2 --enable-vpx
+            buildArtifacts: 'true'
     env:
       CONFIGURATION: Release
       PLATFORM: ${{ matrix.platform }}
