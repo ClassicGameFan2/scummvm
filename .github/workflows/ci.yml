@@ -64,7 +64,7 @@ jobs:
         run: |
           mkdir build-scummvm
           cd build-scummvm
-          ../devtools/create_project/cmake/Debug/create_project.exe .. --msvc --vcpkg --enable-all-engines ${{ matrix.configFlags }}
+          ../devtools/create_project/cmake/Debug/create_project.exe .. --msvc --vcpkg --disable-all-engines --enable-engine=twine,asylum ${{ matrix.configFlags }}
           ls
       - name: Add msbuild to PATH
         uses: microsoft/setup-msbuild@v2
