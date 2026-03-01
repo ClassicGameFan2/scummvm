@@ -113,7 +113,7 @@ AsylumEngine::~AsylumEngine() {
 
 Common::Error AsylumEngine::run() {
 	// Initialize the graphics
-	initGraphics(640, 480);
+	initGraphics(1280, 720);
 
 	// Create debugger. It requires GFX to be initialized
 	setDebugger(new Console(this));
