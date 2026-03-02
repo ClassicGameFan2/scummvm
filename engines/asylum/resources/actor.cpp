@@ -3615,7 +3615,7 @@ void Actor::setVisible(bool value) {
 }
 
 bool Actor::isOnScreen() {
-	Common::Rect scene(getWorld()->xLeft, getWorld()->yTop, getWorld()->xLeft + 640, getWorld()->yTop + 480);
+	Common::Rect scene(getWorld()->xLeft, getWorld()->yTop, getWorld()->xLeft + ASYLUM_SCREEN_WIDTH, getWorld()->yTop + ASYLUM_SCREEN_HEIGHT);
 	Common::Rect actor(_boundingRect);
 	actor.translate(_point1.x, _point1.y);
 
