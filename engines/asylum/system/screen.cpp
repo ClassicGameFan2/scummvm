@@ -43,10 +43,10 @@ int g_debugDrawRects;
 
 Screen::Screen(AsylumEngine *vm) : _vm(vm) ,
 	_useColorKey(false), _transTableCount(0), _transTable(nullptr), _transTableBuffer(nullptr) {
-	_backBuffer.create(640, 480, Graphics::PixelFormat::createFormatCLUT8());
+	_backBuffer.create(ASYLUM_SCREEN_WIDTH, ASYLUM_SCREEN_HEIGHT, Graphics::PixelFormat::createFormatCLUT8());
 
 	_flag = -1;
-	_clipRect = Common::Rect(0, 0, 640, 480);
+	_clipRect = Common::Rect(0, 0, ASYLUM_SCREEN_WIDTH, ASYLUM_SCREEN_HEIGHT);
 
 	memset(&_currentPalette, 0, sizeof(_currentPalette));
 	memset(&_mainPalette, 0, sizeof(_mainPalette));
@@ -192,14 +192,14 @@ void Screen::draw(const Graphics::Surface &surface, int x, int y) {
 // Misc
 //////////////////////////////////////////////////////////////////////////
 void Screen::clear() {
-	_backBuffer.fillRect(Common::Rect(0, 0, 640, 480), 0);
+	_backBuffer.fillRect(Common::Rect(0, 0, ASYLUM_SCREEN_WIDTH, ASYLUM_SCREEN_HEIGHT), 0);
 	copyBackBufferToScreen();
 }
 
 void Screen::drawWideScreenBars(int16 barSize) const {
 	if (barSize > 0) {
-		_vm->_system->fillScreen(Common::Rect(0, 0, 640, barSize), 0);
-		_vm->_system->fillScreen(Common::Rect(0, 480 - barSize, 640, 480), 0);
+		_vm->_system->fillScreen(Common::Rect(0, 0, ASYLUM_SCREEN_WIDTH, barSize), 0);
+		_vm->_system->fillScreen(Common::Rect(0, ASYLUM_SCREEN_HEIGHT - barSize, ASYLUM_SCREEN_WIDTH, ASYLUM_SCREEN_HEIGHT), 0);
 	}
 }
 
@@ -1184,15 +1184,15 @@ void Screen::copyToBackBufferWithTransparency(byte *buffer, int32 pitch, int16 x
 
 	int32 left = (x < 0) ? -x : 0;
 	int32 top = (y < 0) ? -y : 0;
-	int32 right = (x + width > 640) ? 640 - abs(x) : width;
-	int32 bottom = (y + height > 480) ? 480 - abs(y) : height;
+	int32 right = (x + width > ASYLUM_SCREEN_WIDTH) ? ASYLUM_SCREEN_WIDTH - abs(x) : width;
+	int32 bottom = (y + height > ASYLUM_SCREEN_HEIGHT) ? ASYLUM_SCREEN_HEIGHT - abs(y) : height;
 
 	for (int32 curY = top; curY < bottom; curY++) {
 		for (int32 curX = left; curX < right; curX++) {
 			uint32 offset = (uint32)((mirrored ? right - (curX + 1) : curX) + curY * pitch);
 
 			if (buffer[offset] != 0)
-				dest[x + curX + (y + curY) * 640] = buffer[offset];
+				dest[x + curX + (y + curY) * ASYLUM_SCREEN_WIDTH] = buffer[offset];
 		}
 	}
 }
@@ -1213,7 +1213,7 @@ void Screen::drawRect(const Common::Rect &rect, uint32 color) {
 }
 
 void Screen::copyToBackBufferClipped(Graphics::Surface *surface, int16 x, int16 y) {
-	Common::Rect screenRect(getWorld()->xLeft, getWorld()->yTop, getWorld()->xLeft + 640, getWorld()->yTop + 480);
+	Common::Rect screenRect(getWorld()->xLeft, getWorld()->yTop, getWorld()->xLeft + ASYLUM_SCREEN_WIDTH, getWorld()->yTop + ASYLUM_SCREEN_HEIGHT);
 	Common::Rect animRect(x, y, x + (int16)surface->w, y + (int16)surface->h);
 	animRect.clip(screenRect);
 
@@ -1221,12 +1221,12 @@ void Screen::copyToBackBufferClipped(Graphics::Surface *surface, int16 x, int16 
 		// Translate animation rectangle
 		animRect.translate(-(int16)getWorld()->xLeft, -(int16)getWorld()->yTop);
 
-		int startX = animRect.right  == 640 ? 0 : surface->w - animRect.width();
-		int startY = animRect.bottom == 480 ? 0 : surface->h - animRect.height();
+		int startX = animRect.right  == ASYLUM_SCREEN_WIDTH ? 0 : surface->w - animRect.width();
+		int startY = animRect.bottom == ASYLUM_SCREEN_HEIGHT ? 0 : surface->h - animRect.height();
 
-		if (surface->w > 640)
+		if (surface->w > ASYLUM_SCREEN_WIDTH)
 			startX = getWorld()->xLeft;
-		if (surface->h > 480)
+		if (surface->h > ASYLUM_SCREEN_HEIGHT)
 			startY = getWorld()->yTop;
 
 		_vm->screen()->copyToBackBufferWithTransparency(
