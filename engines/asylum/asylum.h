@@ -52,8 +52,8 @@ struct ADGameDescription;
 
 namespace Asylum {
 
-const int ASYLUM_SCREEN_WIDTH = 800;
-const int ASYLUM_SCREEN_HEIGHT = 600;
+const int ASYLUM_SCREEN_WIDTH = 1366;
+const int ASYLUM_SCREEN_HEIGHT = 768;
 
 class Cursor;
 class Encounter;
