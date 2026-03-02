@@ -72,7 +72,7 @@ Scene::Scene(AsylumEngine *engine): _vm(engine),
 	_keyState = 0;
 	_rightButtonDown = false;
 
-	_savedScreen.create(640, 480, Graphics::PixelFormat::createFormatCLUT8());
+	_savedScreen.create(ASYLUM_SCREEN_WIDTH, ASYLUM_SCREEN_HEIGHT, Graphics::PixelFormat::createFormatCLUT8());
 
 	_debugShowVersion = false;
 	g_debugActors = 0;
@@ -1182,14 +1182,14 @@ void Scene::updateCoordinates() {
 		if (xLeft < 0)
 			xLeft = _ws->xLeft = 0;
 
-		if (xLeft > (_ws->width - 640))
-			xLeft = _ws->xLeft = _ws->width - 640;
+		if (xLeft > (_ws->width - ASYLUM_SCREEN_WIDTH))
+			xLeft = _ws->xLeft = _ws->width - ASYLUM_SCREEN_WIDTH;
 
 		if (yTop < 0)
 			yTop = _ws->yTop = 0;
 
-		if (yTop > (_ws->height - 480))
-			yTop = _ws->yTop = _ws->height - 480;
+		if (yTop > (_ws->height - ASYLUM_SCREEN_HEIGHT))
+			yTop = _ws->yTop = _ws->height - ASYLUM_SCREEN_HEIGHT;
 
 		break;
 
@@ -2230,8 +2230,8 @@ bool Scene::updateSceneCoordinates(int32 tX, int32 tY, int32 A0, bool checkScene
 
 	// Adjust coordinates
 	if (checkSceneCoords)
-		if (*targetX + 640 > _ws->width)
-			*targetX = _ws->width - 640;
+		if (*targetX + ASYLUM_SCREEN_WIDTH > _ws->width)
+			*targetX = _ws->width - ASYLUM_SCREEN_WIDTH;
 
 	if (*targetX < sr->left)
 		*targetX = sr->left;
@@ -2239,15 +2239,15 @@ bool Scene::updateSceneCoordinates(int32 tX, int32 tY, int32 A0, bool checkScene
 	if (*targetY < sr->top)
 		*targetY = sr->top;
 
-	if (*targetX + 640 > sr->right)
-		*targetX = sr->right - 640;
+	if (*targetX + ASYLUM_SCREEN_WIDTH > sr->right)
+		*targetX = sr->right - ASYLUM_SCREEN_WIDTH;
 
-	if (*targetY + 480 > sr->bottom)
-		*targetY = sr->bottom - 480;
+	if (*targetY + ASYLUM_SCREEN_HEIGHT > sr->bottom)
+		*targetY = sr->bottom - ASYLUM_SCREEN_HEIGHT;
 
 	if (checkSceneCoords)
-		if (*targetY + 480 > _ws->height)
-			*targetY = _ws->height - 480;
+		if (*targetY + ASYLUM_SCREEN_HEIGHT > _ws->height)
+			*targetY = _ws->height - ASYLUM_SCREEN_HEIGHT;
 
 	// Adjust scene offsets & coordinates
 	getSharedData()->setSceneOffset(0);
@@ -2521,7 +2521,7 @@ bool Scene::drawScene() {
 	_vm->screen()->clearGraphicsInQueue();
 
 	if (getSharedData()->getFlag(kFlagSkipDrawScene)) {
-		_vm->screen()->fillRect(0, 0, 640, 480, 0);
+		_vm->screen()->fillRect(0, 0, ASYLUM_SCREEN_WIDTH, ASYLUM_SCREEN_HEIGHT, 0);
 		getCursor()->hide();
 
 		return false;
@@ -2866,13 +2866,13 @@ void Scene::debugScreenScrolling() {
 	// Horizontal scrolling
 	if (getCursor()->position().x < SCREEN_EDGES && _ws->xLeft >= SCROLL_STEP)
 		_ws->xLeft -= SCROLL_STEP;
-	else if (getCursor()->position().x > (640 - SCREEN_EDGES) && _ws->xLeft <= (rect.width() - (640 + SCROLL_STEP)))
+	else if (getCursor()->position().x > (ASYLUM_SCREEN_WIDTH - SCREEN_EDGES) && _ws->xLeft <= (rect.width() - (ASYLUM_SCREEN_WIDTH + SCROLL_STEP)))
 		_ws->xLeft += SCROLL_STEP;
 
 	// Vertical scrolling
 	if (getCursor()->position().y < SCREEN_EDGES && _ws->yTop >= SCROLL_STEP)
 		_ws->yTop -= SCROLL_STEP;
-	else if (getCursor()->position().y > (480 - SCREEN_EDGES) && _ws->yTop <= (rect.height() - (480 + SCROLL_STEP)))
+	else if (getCursor()->position().y > (ASYLUM_SCREEN_HEIGHT - SCREEN_EDGES) && _ws->yTop <= (rect.height() - (ASYLUM_SCREEN_HEIGHT + SCROLL_STEP)))
 		_ws->yTop += SCROLL_STEP;
 }
 
