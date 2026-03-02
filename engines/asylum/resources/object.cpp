@@ -205,7 +205,7 @@ void Object::disableAndRemoveFromQueue() {
 // Visibility
 //////////////////////////////////////////////////////////////////////////
 bool Object::isOnScreen() {
-	Common::Rect screenRect = Common::Rect((int16)getWorld()->xLeft, (int16)getWorld()->yTop, (int16)(getWorld()->xLeft + 640), (int16)(getWorld()->yTop + 480));
+	Common::Rect screenRect = Common::Rect((int16)getWorld()->xLeft, (int16)getWorld()->yTop, (int16)(getWorld()->xLeft + ASYLUM_SCREEN_WIDTH), (int16)(getWorld()->yTop + ASYLUM_SCREEN_HEIGHT));
 	Common::Rect objectRect = Common::Rect(_boundingRect);
 
 	objectRect.translate((int16)x, (int16)y);
