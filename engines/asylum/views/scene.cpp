@@ -45,8 +45,10 @@
 #include "asylum/staticres.h"
 
 // --- Required for background dumping ---
+#undef PALETTE_SIZE
 #include "image/png.h"
 #include "common/file.h"
+#include "common/path.h"
 // ---------------------------
 
 namespace Asylum {
@@ -400,25 +402,29 @@ bool Scene::init() {
 	if (_ws->backgroundImage != 0) {
 		// Name the file based on the room/pack ID
 		Common::String dumpName = Common::String::format("sanitarium_bg_pack_%d.png", _packId);
+		
+		// Convert the string to a ScummVM Path object to prevent compiler errors
+		Common::Path dumpPath(dumpName);
 
 		// Check if it already exists so we only dump it ONCE!
-		if (!Common::File::exists(dumpName)) {
+		if (!Common::File::exists(dumpPath)) {
 			
 			// Extract the full raw background resource from memory
-			GraphicResource *bgRes = new GraphicResource(_vm, _ws->backgroundImage);
-			
-			if (bgRes && bgRes->getFrameCount() > 0) {
+			// Use the static method for getFrameCount
+			if (GraphicResource::getFrameCount(_vm, _ws->backgroundImage) > 0) {
+				
+				GraphicResource *bgRes = new GraphicResource(_vm, _ws->backgroundImage);
 				GraphicFrame *bgFrame = bgRes->getFrame(0);
 				
 				Common::DumpFile out;
-				if (out.open(dumpName)) {
+				if (out.open(dumpPath)) {
 					// Write the full image directly to disk, applying the current room's palette!
 					Image::writePNG(out, bgFrame->surface, getScreen()->getPalette());
 					out.close();
 					warning("Successfully dumped full background: %s", dumpName.c_str());
 				}
+				delete bgRes; // Free memory
 			}
-			delete bgRes; // Free memory
 		}
 	}
 	// --- END OF NEW CODE ---
