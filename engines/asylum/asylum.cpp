@@ -55,6 +55,9 @@
 
 namespace Asylum {
 
+int ASYLUM_SCREEN_WIDTH = 640;
+int ASYLUM_SCREEN_HEIGHT = 480;
+
 const char *const engineKeyMapId = "asylum";
 const char *const resviewerKeyMapId = "asylum-resviewer";
 
@@ -112,6 +115,15 @@ AsylumEngine::~AsylumEngine() {
 }
 
 Common::Error AsylumEngine::run() {
+
+	// Check scummvm.ini for custom resolution
+	if (ConfMan.hasKey("asylum_width")) ASYLUM_SCREEN_WIDTH = ConfMan.getInt("asylum_width");
+	if (ConfMan.hasKey("asylum_height")) ASYLUM_SCREEN_HEIGHT = ConfMan.getInt("asylum_height");
+	
+	// Safety check: Don't let it go smaller than the original game or it will definitely crash
+	if (ASYLUM_SCREEN_WIDTH < 640) ASYLUM_SCREEN_WIDTH = 640;
+	if (ASYLUM_SCREEN_HEIGHT < 480) ASYLUM_SCREEN_HEIGHT = 480;
+	
 	// Initialize the graphics
 	initGraphics(ASYLUM_SCREEN_WIDTH, ASYLUM_SCREEN_HEIGHT);
 
