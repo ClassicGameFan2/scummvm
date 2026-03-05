@@ -53,6 +53,8 @@
 #include "asylum/console.h"
 #include "asylum/respack.h"
 
+#include "common/config-manager.h"
+
 namespace Asylum {
 
 int ASYLUM_SCREEN_WIDTH = 640;
