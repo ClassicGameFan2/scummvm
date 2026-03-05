@@ -44,6 +44,11 @@
 #include "asylum/respack.h"
 #include "asylum/staticres.h"
 
+// --- Required for background dumping ---
+#include "image/png.h"
+#include "common/file.h"
+// ---------------------------
+
 namespace Asylum {
 
 #define SCREEN_EDGES 40
@@ -390,6 +395,33 @@ bool Scene::init() {
 	getScreen()->selectTransTable(1);
 
 	getCursor()->show();
+
+	// --- NEW BACKGROUND DUMPING CODE ---
+	if (_ws->backgroundImage != 0) {
+		// Name the file based on the room/pack ID
+		Common::String dumpName = Common::String::format("sanitarium_bg_pack_%d.png", _packId);
+
+		// Check if it already exists so we only dump it ONCE!
+		if (!Common::File::exists(dumpName)) {
+			
+			// Extract the full raw background resource from memory
+			GraphicResource *bgRes = new GraphicResource(_vm, _ws->backgroundImage);
+			
+			if (bgRes && bgRes->getFrameCount() > 0) {
+				GraphicFrame *bgFrame = bgRes->getFrame(0);
+				
+				Common::DumpFile out;
+				if (out.open(dumpName)) {
+					// Write the full image directly to disk, applying the current room's palette!
+					Image::writePNG(out, bgFrame->surface, getScreen()->getPalette());
+					out.close();
+					warning("Successfully dumped full background: %s", dumpName.c_str());
+				}
+			}
+			delete bgRes; // Free memory
+		}
+	}
+	// --- END OF NEW CODE ---
 
 	return true;
 }
