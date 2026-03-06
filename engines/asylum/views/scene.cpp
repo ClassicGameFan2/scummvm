@@ -573,7 +573,6 @@ bool Scene::key(const AsylumEvent &evt) {
 		warning("[Scene::key] debug command handling not implemented!");
 		break;
 
-
 	// --- NEW ASSET EXTRACTOR (Press 'D' in-game) ---
 	case Common::KEYCODE_d: {
 		warning("Starting Asset Dump for Pack %d...", _packId);
@@ -599,8 +598,10 @@ bool Scene::key(const AsylumEvent &evt) {
 			if (objResId != 0 && GraphicResource::getFrameCount(_vm, objResId) > 0) {
 				GraphicResource *objRes = new GraphicResource(_vm, objResId);
 				
-				// Some objects have multiple frames (like lights turning on/off)
-				for (uint32 f = 0; f < objRes->getFrameCount(); f++) {
+				// CORRECTED: Ask the engine for the frame count using the static method
+				uint32 totalFrames = GraphicResource::getFrameCount(_vm, objResId);
+				
+				for (uint32 f = 0; f < totalFrames; f++) {
 					GraphicFrame *objFrame = objRes->getFrame(f);
 					
 					// Filter out small items. If it's bigger than 150 pixels, it's a structure!
