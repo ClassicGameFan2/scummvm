@@ -2526,45 +2526,49 @@ bool Scene::drawScene() {
 		error("[Scene::drawScene] WorldStats not initialized properly!");
 
 
-
-	// --- NEW SMART DUMPING CODE WITH FADE TIMER ---
-	// 0xFFFFFFFF ensures that even if a background ID is 0, it still triggers!
-	static uint32 lastDumpedBg = 0xFFFFFFFF; 
-	static int32 lastDumpedPack = -1;
-	static int dumpCountdown = -1;
+	// --- NEW SMART DUMPING CODE WITH BRIGHTNESS SENSOR ---
+	static Common::String lastProcessedRoom = "";
 	
-	// 1. Check if we entered a new room (either Pack ID or Background ID changed)
-	if (_ws->backgroundImage != lastDumpedBg || _packId != lastDumpedPack) {
-		lastDumpedBg = _ws->backgroundImage;
-		lastDumpedPack = _packId;
+	if (_ws->backgroundImage != 0) {
 		
-		// 2. Set a timer for 120 frames to wait for the black fade-in to completely finish!
-		dumpCountdown = 120; 
-	}
+		// Create an ultra-specific filename so no sub-rooms ever overwrite each other
+		Common::String currentRoom = Common::String::format("sanitarium_bg_chap%d_pack%d_bg%u_pal%u.png", 
+			(int)_ws->chapter, (int)_packId, _ws->backgroundImage, _ws->currentPaletteId);
 
-	// 3. Tick down the timer every frame
-	if (dumpCountdown > 0) {
-		dumpCountdown--;
-		
-		// 4. When the timer hits exactly 0, the fade is guaranteed to be done. Take the picture!
-		if (dumpCountdown == 0) {
-			Common::String dumpName = Common::String::format("sanitarium_bg_pack_%d_id_%u.png", (int)_packId, _ws->backgroundImage);
-			Common::Path dumpPath(dumpName);
-
-			if (!Common::File::exists(dumpPath)) {
-				if (GraphicResource::getFrameCount(_vm, _ws->backgroundImage) > 0) {
-					GraphicResource *bgRes = new GraphicResource(_vm, _ws->backgroundImage);
-					GraphicFrame *bgFrame = bgRes->getFrame(0);
-					
-					Common::DumpFile out;
-					if (out.open(dumpPath)) {
-						// The palette is now 100% bright, write it to disk!
-						Image::writePNG(out, bgFrame->surface, getScreen()->getPalette());
-						out.close();
-						warning("Successfully dumped full background: %s", dumpName.c_str());
+		// Did we enter a new room, or are we still waiting for it to fade in?
+		if (currentRoom != lastProcessedRoom) {
+			
+			// 1. Measure the total brightness of the current color palette
+			const byte *currentPalette = getScreen()->getPalette();
+			uint32 totalBrightness = 0;
+			for (int i = 0; i < 768; i++) {
+				totalBrightness += currentPalette[i];
+			}
+			
+			// 2. A pitch black screen has a brightness of 0.
+			// By waiting for it to pass 5000, we guarantee the gradual fade-in is finished!
+			if (totalBrightness > 5000) {
+				
+				Common::Path dumpPath(currentRoom);
+				
+				// 3. Does this image already exist on the hard drive?
+				if (!Common::File::exists(dumpPath)) {
+					if (GraphicResource::getFrameCount(_vm, _ws->backgroundImage) > 0) {
+						GraphicResource *bgRes = new GraphicResource(_vm, _ws->backgroundImage);
+						GraphicFrame *bgFrame = bgRes->getFrame(0);
+						
+						Common::DumpFile out;
+						if (out.open(dumpPath)) {
+							Image::writePNG(out, bgFrame->surface, currentPalette);
+							out.close();
+							warning("Successfully dumped: %s", currentRoom.c_str());
+						}
+						delete bgRes; // Free memory
 					}
-					delete bgRes; // Free memory
 				}
+				
+				// 4. Mark this room as processed so we don't check the disk again!
+				lastProcessedRoom = currentRoom;
 			}
 		}
 	}
