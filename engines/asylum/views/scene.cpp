@@ -398,37 +398,6 @@ bool Scene::init() {
 
 	getCursor()->show();
 
-	// --- NEW BACKGROUND DUMPING CODE ---
-	if (_ws->backgroundImage != 0) {
-		// Name the file based on the room/pack ID
-		Common::String dumpName = Common::String::format("sanitarium_bg_pack_%d.png", _packId);
-		
-		// Convert the string to a ScummVM Path object to prevent compiler errors
-		Common::Path dumpPath(dumpName);
-
-		// Check if it already exists so we only dump it ONCE!
-		if (!Common::File::exists(dumpPath)) {
-			
-			// Extract the full raw background resource from memory
-			// Use the static method for getFrameCount
-			if (GraphicResource::getFrameCount(_vm, _ws->backgroundImage) > 0) {
-				
-				GraphicResource *bgRes = new GraphicResource(_vm, _ws->backgroundImage);
-				GraphicFrame *bgFrame = bgRes->getFrame(0);
-				
-				Common::DumpFile out;
-				if (out.open(dumpPath)) {
-					// Write the full image directly to disk, applying the current room's palette!
-					Image::writePNG(out, bgFrame->surface, getScreen()->getPalette());
-					out.close();
-					warning("Successfully dumped full background: %s", dumpName.c_str());
-				}
-				delete bgRes; // Free memory
-			}
-		}
-	}
-	// --- END OF NEW CODE ---
-
 	return true;
 }
 
@@ -2555,6 +2524,38 @@ void Scene::preload() {
 bool Scene::drawScene() {
 	if (!_ws)
 		error("[Scene::drawScene] WorldStats not initialized properly!");
+
+
+	// --- NEW SMART DUMPING CODE ---
+	// This variable remembers the last background we looked at so we don't spam the hard drive!
+	static uint32 lastDumpedBg = 0;
+	
+	if (_ws->backgroundImage != 0 && _ws->backgroundImage != lastDumpedBg) {
+		lastDumpedBg = _ws->backgroundImage; // Remember this new background
+
+		// Name the file based on the exact Resource ID of the image, guaranteeing every room is unique!
+		Common::String dumpName = Common::String::format("sanitarium_bg_%u.png", _ws->backgroundImage);
+		Common::Path dumpPath(dumpName);
+
+		// Check if it already exists
+		if (!Common::File::exists(dumpPath)) {
+			
+			if (GraphicResource::getFrameCount(_vm, _ws->backgroundImage) > 0) {
+				GraphicResource *bgRes = new GraphicResource(_vm, _ws->backgroundImage);
+				GraphicFrame *bgFrame = bgRes->getFrame(0);
+				
+				Common::DumpFile out;
+				if (out.open(dumpPath)) {
+					// Write the full image directly to disk, applying the current room's palette!
+					Image::writePNG(out, bgFrame->surface, getScreen()->getPalette());
+					out.close();
+					warning("Successfully dumped full background: %s", dumpName.c_str());
+				}
+				delete bgRes; // Free memory
+			}
+		}
+	}
+	// --- END OF NEW CODE ---
 
 	_vm->screen()->clearGraphicsInQueue();
 
