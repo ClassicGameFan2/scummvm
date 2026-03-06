@@ -2526,32 +2526,45 @@ bool Scene::drawScene() {
 		error("[Scene::drawScene] WorldStats not initialized properly!");
 
 
-	// --- NEW SMART DUMPING CODE ---
-	// This variable remembers the last background we looked at so we don't spam the hard drive!
-	static uint32 lastDumpedBg = 0;
+
+	// --- NEW SMART DUMPING CODE WITH FADE TIMER ---
+	// 0xFFFFFFFF ensures that even if a background ID is 0, it still triggers!
+	static uint32 lastDumpedBg = 0xFFFFFFFF; 
+	static int32 lastDumpedPack = -1;
+	static int dumpCountdown = -1;
 	
-	if (_ws->backgroundImage != 0 && _ws->backgroundImage != lastDumpedBg) {
-		lastDumpedBg = _ws->backgroundImage; // Remember this new background
+	// 1. Check if we entered a new room (either Pack ID or Background ID changed)
+	if (_ws->backgroundImage != lastDumpedBg || _packId != lastDumpedPack) {
+		lastDumpedBg = _ws->backgroundImage;
+		lastDumpedPack = _packId;
+		
+		// 2. Set a timer for 120 frames to wait for the black fade-in to completely finish!
+		dumpCountdown = 120; 
+	}
 
-		// Name the file based on the exact Resource ID of the image, guaranteeing every room is unique!
-		Common::String dumpName = Common::String::format("sanitarium_bg_%u.png", _ws->backgroundImage);
-		Common::Path dumpPath(dumpName);
+	// 3. Tick down the timer every frame
+	if (dumpCountdown > 0) {
+		dumpCountdown--;
+		
+		// 4. When the timer hits exactly 0, the fade is guaranteed to be done. Take the picture!
+		if (dumpCountdown == 0) {
+			Common::String dumpName = Common::String::format("sanitarium_bg_pack_%d_id_%u.png", (int)_packId, _ws->backgroundImage);
+			Common::Path dumpPath(dumpName);
 
-		// Check if it already exists
-		if (!Common::File::exists(dumpPath)) {
-			
-			if (GraphicResource::getFrameCount(_vm, _ws->backgroundImage) > 0) {
-				GraphicResource *bgRes = new GraphicResource(_vm, _ws->backgroundImage);
-				GraphicFrame *bgFrame = bgRes->getFrame(0);
-				
-				Common::DumpFile out;
-				if (out.open(dumpPath)) {
-					// Write the full image directly to disk, applying the current room's palette!
-					Image::writePNG(out, bgFrame->surface, getScreen()->getPalette());
-					out.close();
-					warning("Successfully dumped full background: %s", dumpName.c_str());
+			if (!Common::File::exists(dumpPath)) {
+				if (GraphicResource::getFrameCount(_vm, _ws->backgroundImage) > 0) {
+					GraphicResource *bgRes = new GraphicResource(_vm, _ws->backgroundImage);
+					GraphicFrame *bgFrame = bgRes->getFrame(0);
+					
+					Common::DumpFile out;
+					if (out.open(dumpPath)) {
+						// The palette is now 100% bright, write it to disk!
+						Image::writePNG(out, bgFrame->surface, getScreen()->getPalette());
+						out.close();
+						warning("Successfully dumped full background: %s", dumpName.c_str());
+					}
+					delete bgRes; // Free memory
 				}
-				delete bgRes; // Free memory
 			}
 		}
 	}
