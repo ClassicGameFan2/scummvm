@@ -573,6 +573,59 @@ bool Scene::key(const AsylumEvent &evt) {
 		warning("[Scene::key] debug command handling not implemented!");
 		break;
 
+
+	// --- NEW ASSET EXTRACTOR (Press 'D' in-game) ---
+	case Common::KEYCODE_d: {
+		warning("Starting Asset Dump for Pack %d...", _packId);
+		const byte *pal = getScreen()->getPalette();
+
+		// 1. Dump the Main Background
+		if (_ws->backgroundImage != 0 && GraphicResource::getFrameCount(_vm, _ws->backgroundImage) > 0) {
+			GraphicResource *bgRes = new GraphicResource(_vm, _ws->backgroundImage);
+			Common::String bgName = Common::String::format("sanitarium_dump_pack%d_bg%u.png", _packId, _ws->backgroundImage);
+			Common::DumpFile out;
+			if (out.open(Common::Path(bgName))) {
+				Image::writePNG(out, bgRes->getFrame(0)->surface, pal);
+				out.close();
+				warning("Dumped main background: %s", bgName.c_str());
+			}
+			delete bgRes;
+		}
+
+		// 2. Scan and Dump all Large Objects (Cells, Huts, Church, etc.)
+		for (uint i = 0; i < _ws->objects.size(); i++) {
+			ResourceId objResId = _ws->objects[i]->getResourceId();
+			
+			if (objResId != 0 && GraphicResource::getFrameCount(_vm, objResId) > 0) {
+				GraphicResource *objRes = new GraphicResource(_vm, objResId);
+				
+				// Some objects have multiple frames (like lights turning on/off)
+				for (uint32 f = 0; f < objRes->getFrameCount(); f++) {
+					GraphicFrame *objFrame = objRes->getFrame(f);
+					
+					// Filter out small items. If it's bigger than 150 pixels, it's a structure!
+					if (objFrame->getRect().width() > 150 || objFrame->getRect().height() > 150) {
+						Common::String objName = Common::String::format("sanitarium_dump_pack%d_obj%u_id%u_frame%d.png", _packId, i, objResId, f);
+						Common::Path objPath(objName);
+						
+						if (!Common::File::exists(objPath)) {
+							Common::DumpFile out;
+							if (out.open(objPath)) {
+								Image::writePNG(out, objFrame->surface, pal);
+								out.close();
+								warning("Dumped giant object: %s", objName.c_str());
+							}
+						}
+					}
+				}
+				delete objRes;
+			}
+		}
+		warning("Asset Dump Complete!");
+		break;
+	}
+	// --- END OF EXTRACTOR ---
+
 	case Common::KEYCODE_LEFTBRACKET:
 		if (evt.kbd.ascii != 123)
 			break;
@@ -2526,53 +2579,6 @@ bool Scene::drawScene() {
 		error("[Scene::drawScene] WorldStats not initialized properly!");
 
 
-	// --- NEW SMART DUMPING CODE WITH BRIGHTNESS SENSOR ---
-	static Common::String lastProcessedRoom = "";
-	
-	if (_ws->backgroundImage != 0) {
-		
-		// Create an ultra-specific filename so no sub-rooms ever overwrite each other
-		Common::String currentRoom = Common::String::format("sanitarium_bg_chap%d_pack%d_bg%u_pal%u.png", 
-			(int)_ws->chapter, (int)_packId, _ws->backgroundImage, _ws->currentPaletteId);
-
-		// Did we enter a new room, or are we still waiting for it to fade in?
-		if (currentRoom != lastProcessedRoom) {
-			
-			// 1. Measure the total brightness of the current color palette
-			const byte *currentPalette = getScreen()->getPalette();
-			uint32 totalBrightness = 0;
-			for (int i = 0; i < 768; i++) {
-				totalBrightness += currentPalette[i];
-			}
-			
-			// 2. A pitch black screen has a brightness of 0.
-			// By waiting for it to pass 5000, we guarantee the gradual fade-in is finished!
-			if (totalBrightness > 5000) {
-				
-				Common::Path dumpPath(currentRoom);
-				
-				// 3. Does this image already exist on the hard drive?
-				if (!Common::File::exists(dumpPath)) {
-					if (GraphicResource::getFrameCount(_vm, _ws->backgroundImage) > 0) {
-						GraphicResource *bgRes = new GraphicResource(_vm, _ws->backgroundImage);
-						GraphicFrame *bgFrame = bgRes->getFrame(0);
-						
-						Common::DumpFile out;
-						if (out.open(dumpPath)) {
-							Image::writePNG(out, bgFrame->surface, currentPalette);
-							out.close();
-							warning("Successfully dumped: %s", currentRoom.c_str());
-						}
-						delete bgRes; // Free memory
-					}
-				}
-				
-				// 4. Mark this room as processed so we don't check the disk again!
-				lastProcessedRoom = currentRoom;
-			}
-		}
-	}
-	// --- END OF NEW CODE ---
 
 	_vm->screen()->clearGraphicsInQueue();
 
