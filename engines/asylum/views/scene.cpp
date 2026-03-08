@@ -2555,7 +2555,9 @@ bool Scene::drawScene() {
 			// Dump main background
 			if (_ws->backgroundImage != 0 && GraphicResource::getFrameCount(_vm, _ws->backgroundImage) > 0) {
 				GraphicResource *bgRes = new GraphicResource(_vm, _ws->backgroundImage);
-				if (bgRes && bgRes->getFrameCount() > 0) {
+				
+				// FIXED: Just check if the resource loaded successfully, we already know the frame count > 0!
+				if (bgRes) { 
 					GraphicFrame *bgFrame = bgRes->getFrame(0);
 					if (bgFrame && bgFrame->surface.getPixels()) {
 						Common::String bgName = Common::String::format("sanitarium_dump_pack%d_bg%u.png", _packId, _ws->backgroundImage);
