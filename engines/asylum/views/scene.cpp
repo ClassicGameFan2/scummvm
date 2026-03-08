@@ -581,45 +581,63 @@ bool Scene::key(const AsylumEvent &evt) {
 		// 1. Dump the Main Background
 		if (_ws->backgroundImage != 0 && GraphicResource::getFrameCount(_vm, _ws->backgroundImage) > 0) {
 			GraphicResource *bgRes = new GraphicResource(_vm, _ws->backgroundImage);
-			Common::String bgName = Common::String::format("sanitarium_dump_pack%d_bg%u.png", _packId, _ws->backgroundImage);
-			Common::DumpFile out;
-			if (out.open(Common::Path(bgName))) {
-				Image::writePNG(out, bgRes->getFrame(0)->surface, pal);
-				out.close();
-				warning("Dumped main background: %s", bgName.c_str());
+			
+			// Safety check the background frame
+			if (bgRes && bgRes->getFrame(0) && bgRes->getFrame(0)->surface.getPixels()) {
+				Common::String bgName = Common::String::format("sanitarium_dump_pack%d_bg%u.png", _packId, _ws->backgroundImage);
+				Common::DumpFile out;
+				if (out.open(Common::Path(bgName))) {
+					Image::writePNG(out, bgRes->getFrame(0)->surface, pal);
+					out.close();
+					warning("Dumped main background: %s", bgName.c_str());
+				}
 			}
 			delete bgRes;
 		}
 
 		// 2. Scan and Dump all Large Objects (Cells, Huts, Church, etc.)
 		for (uint i = 0; i < _ws->objects.size(); i++) {
+			
+			// HEARTBEAT: Process events so the OS doesn't force-close the "frozen" window
+			Common::Event ev;
+			_vm->getEventManager()->pollEvent(ev);
+
+			// SAFETY CHECK 1: Ensure the object actually exists in memory
+			if (!_ws->objects[i]) continue;
+
 			ResourceId objResId = _ws->objects[i]->getResourceId();
 			
 			if (objResId != 0 && GraphicResource::getFrameCount(_vm, objResId) > 0) {
 				GraphicResource *objRes = new GraphicResource(_vm, objResId);
 				
-				// CORRECTED: Ask the engine for the frame count using the static method
-				uint32 totalFrames = GraphicResource::getFrameCount(_vm, objResId);
-				
-				for (uint32 f = 0; f < totalFrames; f++) {
-					GraphicFrame *objFrame = objRes->getFrame(f);
+				if (objRes) {
+					uint32 totalFrames = GraphicResource::getFrameCount(_vm, objResId);
 					
-					// Filter out small items. If it's bigger than 150 pixels, it's a structure!
-					if (objFrame->getRect().width() > 150 || objFrame->getRect().height() > 150) {
-						Common::String objName = Common::String::format("sanitarium_dump_pack%d_obj%u_id%u_frame%d.png", _packId, i, objResId, f);
-						Common::Path objPath(objName);
+					for (uint32 f = 0; f < totalFrames; f++) {
+						GraphicFrame *objFrame = objRes->getFrame(f);
 						
-						if (!Common::File::exists(objPath)) {
-							Common::DumpFile out;
-							if (out.open(objPath)) {
-								Image::writePNG(out, objFrame->surface, pal);
-								out.close();
-								warning("Dumped giant object: %s", objName.c_str());
+						// SAFETY CHECK 2: Ensure the frame and its pixel data are perfectly valid!
+						if (!objFrame) continue;
+						if (objFrame->surface.w <= 0 || objFrame->surface.h <= 0) continue;
+						if (!objFrame->surface.getPixels()) continue;
+						
+						// Stricter Filter: Now checks for items bigger than 300 pixels (pure architecture)
+						if (objFrame->getRect().width() > 300 || objFrame->getRect().height() > 300) {
+							Common::String objName = Common::String::format("sanitarium_dump_pack%d_obj%u_id%u_frame%d.png", _packId, i, objResId, f);
+							Common::Path objPath(objName);
+							
+							if (!Common::File::exists(objPath)) {
+								Common::DumpFile out;
+								if (out.open(objPath)) {
+									Image::writePNG(out, objFrame->surface, pal);
+									out.close();
+									warning("Dumped giant object: %s", objName.c_str());
+								}
 							}
 						}
 					}
+					delete objRes;
 				}
-				delete objRes;
 			}
 		}
 		warning("Asset Dump Complete!");
