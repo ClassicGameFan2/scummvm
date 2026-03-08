@@ -613,12 +613,12 @@ bool Scene::key(const AsylumEvent &evt) {
 
 			ResourceId objResId = obj->getResourceId();
 			
-			// QUARANTINE: Ignore invalid IDs and prevent memory overflow
-			if (objResId > 0 && objResId < 500000) {
+			// FIXED: Removed the 500k limit since Sanitarium uses massive shifted Resource IDs!
+			if (objResId != 0) {
 				uint32 totalFrames = GraphicResource::getFrameCount(_vm, objResId);
 				
-				// QUARANTINE 2: Ignore objects with zero frames or insanely high corrupted frame counts
-				if (totalFrames > 0 && totalFrames < 500) {
+				// QUARANTINE: Ignore objects with zero frames or insanely high corrupted frame counts
+				if (totalFrames > 0 && totalFrames < 2000) {
 					warning("[SCAN] Inspecting Object %u (ResID: %u, Frames: %u)...", i, objResId, totalFrames);
 					
 					GraphicResource *objRes = new GraphicResource(_vm, objResId);
@@ -645,6 +645,8 @@ bool Scene::key(const AsylumEvent &evt) {
 						}
 						delete objRes;
 					}
+				} else if (totalFrames >= 2000) {
+					warning("[SKIP] Object %u (ResID: %u) has corrupted frame count: %u", i, objResId, totalFrames);
 				}
 			}
 		}
