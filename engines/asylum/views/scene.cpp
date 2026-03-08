@@ -601,8 +601,6 @@ bool Scene::key(const AsylumEvent &evt) {
 		// 2. Scan and Dump Objects Safely
 		for (uint i = 0; i < _ws->objects.size(); i++) {
 			
-			// HEARTBEAT: Swallow OS events so the computer doesn't think we crashed, 
-			// but do NOT process game logic, keeping the memory perfectly frozen!
 			Common::Event ev;
 			while (_vm->getEventManager()->pollEvent(ev)) {} 
 			g_system->updateScreen();
@@ -613,40 +611,52 @@ bool Scene::key(const AsylumEvent &evt) {
 
 			ResourceId objResId = obj->getResourceId();
 			
-			// FIXED: Removed the 500k limit since Sanitarium uses massive shifted Resource IDs!
 			if (objResId != 0) {
+				// X-RAY 1: Before checking frame count
+				warning("[X-RAY] Checking Object %u | ResID: %u", i, objResId);
+				
 				uint32 totalFrames = GraphicResource::getFrameCount(_vm, objResId);
 				
-				// QUARANTINE: Ignore objects with zero frames or insanely high corrupted frame counts
+				// X-RAY 2: After checking frame count
+				warning("[X-RAY] Object %u | Frames calculated: %u", i, totalFrames);
+				
 				if (totalFrames > 0 && totalFrames < 2000) {
-					warning("[SCAN] Inspecting Object %u (ResID: %u, Frames: %u)...", i, objResId, totalFrames);
-					
 					GraphicResource *objRes = new GraphicResource(_vm, objResId);
+					
+					// X-RAY 3: After loading into RAM
+					warning("[X-RAY] Object %u | Resource loaded into RAM", i);
+					
 					if (objRes) {
 						for (uint32 f = 0; f < totalFrames; f++) {
 							GraphicFrame *objFrame = objRes->getFrame(f);
+							if (!objFrame) continue;
 							
-							if (objFrame && objFrame->surface.getPixels()) {
-								// Extract giant rooms and architecture (> 150 pixels)
-								if (objFrame->getRect().width() > 150 || objFrame->getRect().height() > 150) {
-									Common::String objName = Common::String::format("sanitarium_dump_pack%d_obj%u_id%u_f%d.png", _packId, i, objResId, f);
-									Common::Path objPath(objName);
-									
-									if (!Common::File::exists(objPath)) {
-										Common::DumpFile out;
-										if (out.open(objPath)) {
-											Image::writePNG(out, objFrame->surface, pal);
-											out.close();
-											warning("  -> [SAVED] %s", objName.c_str());
-										}
+							int w = objFrame->surface.w;
+							int h = objFrame->surface.h;
+							int bpp = objFrame->surface.format.bytesPerPixel;
+							
+							// SAFETY LIMITS: Only save 8-bit images (bpp == 1), max size 4000x4000 to prevent overflow
+							if (objFrame->surface.getPixels() && bpp == 1 && w > 150 && w < 4000 && h > 150 && h < 4000) {
+								Common::String objName = Common::String::format("sanitarium_dump_pack%d_obj%u_id%u_f%d.png", _packId, i, objResId, f);
+								Common::Path objPath(objName);
+								
+								if (!Common::File::exists(objPath)) {
+									// X-RAY 4: Before writing the PNG
+									warning("[X-RAY] Object %u | Saving Frame %u (Width: %d, Height: %d)...", i, f, w, h);
+									Common::DumpFile out;
+									if (out.open(objPath)) {
+										Image::writePNG(out, objFrame->surface, pal);
+										out.close();
+										warning("  -> [SAVED] %s", objName.c_str());
 									}
 								}
 							}
 						}
+						// X-RAY 5: Before memory cleanup
+						warning("[X-RAY] Object %u | Deleting resource...", i);
 						delete objRes;
+						warning("[X-RAY] Object %u | Resource deleted successfully.", i);
 					}
-				} else if (totalFrames >= 2000) {
-					warning("[SKIP] Object %u (ResID: %u) has corrupted frame count: %u", i, objResId, totalFrames);
 				}
 			}
 		}
