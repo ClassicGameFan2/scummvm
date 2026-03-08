@@ -53,12 +53,7 @@
 
 namespace Asylum {
 
-// --- ASYNC DUMP GLOBALS ---
-static bool g_dumpActive = false;
-static uint32 g_dumpStage = 0;
-static uint32 g_dumpObjIndex = 0;
-static uint32 g_dumpFrameIndex = 0;
-// --------------------------
+
 
 #define SCREEN_EDGES 40
 #define SCROLL_STEP 10
@@ -580,20 +575,83 @@ bool Scene::key(const AsylumEvent &evt) {
 		warning("[Scene::key] debug command handling not implemented!");
 		break;
 
-	// --- NEW ASSET EXTRACTOR TRIGGER (Press 'D' in-game) ---
+	// --- BULLETPROOF ASSET EXTRACTOR (Press 'D' in-game) ---
 	case Common::KEYCODE_d: {
-		if (!g_dumpActive) {
-			warning("BACKGROUND ASSET DUMP INITIATED! Please wait...");
-			g_dumpActive = true;
-			g_dumpStage = 1; // 1 = Dump Main BG, 2 = Dump Objects
-			g_dumpObjIndex = 0;
-			g_dumpFrameIndex = 0;
-		} else {
-			warning("Dump already in progress...");
+		warning("--- INITIATING SECURE ASSET DUMP FOR PACK %d ---", _packId);
+		const byte *pal = getScreen()->getPalette();
+
+		// 1. Dump the Main Background
+		if (_ws->backgroundImage != 0) {
+			uint32 bgFrames = GraphicResource::getFrameCount(_vm, _ws->backgroundImage);
+			if (bgFrames > 0) {
+				GraphicResource *bgRes = new GraphicResource(_vm, _ws->backgroundImage);
+				if (bgRes && bgRes->getFrame(0) && bgRes->getFrame(0)->surface.getPixels()) {
+					Common::String bgName = Common::String::format("sanitarium_dump_pack%d_bg%u.png", _packId, _ws->backgroundImage);
+					Common::DumpFile out;
+					if (out.open(Common::Path(bgName))) {
+						Image::writePNG(out, bgRes->getFrame(0)->surface, pal);
+						out.close();
+						warning("[SUCCESS] Dumped main background: %s", bgName.c_str());
+					}
+				}
+				delete bgRes;
+			}
 		}
+
+		// 2. Scan and Dump Objects Safely
+		for (uint i = 0; i < _ws->objects.size(); i++) {
+			
+			// HEARTBEAT: Swallow OS events so the computer doesn't think we crashed, 
+			// but do NOT process game logic, keeping the memory perfectly frozen!
+			Common::Event ev;
+			while (_vm->getEventManager()->pollEvent(ev)) {} 
+			g_system->updateScreen();
+			g_system->delayMillis(5);
+
+			Object *obj = _ws->objects[i];
+			if (!obj) continue;
+
+			ResourceId objResId = obj->getResourceId();
+			
+			// QUARANTINE: Ignore invalid IDs and prevent memory overflow
+			if (objResId > 0 && objResId < 500000) {
+				uint32 totalFrames = GraphicResource::getFrameCount(_vm, objResId);
+				
+				// QUARANTINE 2: Ignore objects with zero frames or insanely high corrupted frame counts
+				if (totalFrames > 0 && totalFrames < 500) {
+					warning("[SCAN] Inspecting Object %u (ResID: %u, Frames: %u)...", i, objResId, totalFrames);
+					
+					GraphicResource *objRes = new GraphicResource(_vm, objResId);
+					if (objRes) {
+						for (uint32 f = 0; f < totalFrames; f++) {
+							GraphicFrame *objFrame = objRes->getFrame(f);
+							
+							if (objFrame && objFrame->surface.getPixels()) {
+								// Extract giant rooms and architecture (> 150 pixels)
+								if (objFrame->getRect().width() > 150 || objFrame->getRect().height() > 150) {
+									Common::String objName = Common::String::format("sanitarium_dump_pack%d_obj%u_id%u_f%d.png", _packId, i, objResId, f);
+									Common::Path objPath(objName);
+									
+									if (!Common::File::exists(objPath)) {
+										Common::DumpFile out;
+										if (out.open(objPath)) {
+											Image::writePNG(out, objFrame->surface, pal);
+											out.close();
+											warning("  -> [SAVED] %s", objName.c_str());
+										}
+									}
+								}
+							}
+						}
+						delete objRes;
+					}
+				}
+			}
+		}
+		warning("--- SECURE ASSET DUMP COMPLETE! ---");
 		break;
 	}
-	// --- END OF EXTRACTOR TRIGGER ---
+	// --- END OF EXTRACTOR ---
 
 	case Common::KEYCODE_LEFTBRACKET:
 		if (evt.kbd.ascii != 123)
@@ -2547,96 +2605,7 @@ bool Scene::drawScene() {
 	if (!_ws)
 		error("[Scene::drawScene] WorldStats not initialized properly!");
 
-	// --- ASYNC ASSET DUMPER ---
-	if (g_dumpActive) {
-		const byte *pal = getScreen()->getPalette();
-		
-		if (g_dumpStage == 1) {
-			// Dump main background
-			if (_ws->backgroundImage != 0 && GraphicResource::getFrameCount(_vm, _ws->backgroundImage) > 0) {
-				GraphicResource *bgRes = new GraphicResource(_vm, _ws->backgroundImage);
-				
-				// FIXED: Just check if the resource loaded successfully, we already know the frame count > 0!
-				if (bgRes) { 
-					GraphicFrame *bgFrame = bgRes->getFrame(0);
-					if (bgFrame && bgFrame->surface.getPixels()) {
-						Common::String bgName = Common::String::format("sanitarium_dump_pack%d_bg%u.png", _packId, _ws->backgroundImage);
-						Common::Path bgPath(bgName);
-						if (!Common::File::exists(bgPath)) {
-							Common::DumpFile out;
-							if (out.open(bgPath)) {
-								Image::writePNG(out, bgFrame->surface, pal);
-								out.close();
-								warning("Dumped main background: %s", bgName.c_str());
-							}
-						}
-					}
-				}
-				delete bgRes;
-			}
-			g_dumpStage = 2; // Move to objects next frame
-		} 
-		else if (g_dumpStage == 2) {
-			// Dump ONE object frame per screen draw so the game doesn't freeze!
-			bool advanced = false;
-			
-			while (!advanced && g_dumpObjIndex < _ws->objects.size()) {
-				Object *obj = _ws->objects[g_dumpObjIndex];
-				if (obj) {
-					ResourceId objResId = obj->getResourceId();
-					
-					if (objResId != 0 && GraphicResource::getFrameCount(_vm, objResId) > 0) {
-						uint32 totalFrames = GraphicResource::getFrameCount(_vm, objResId);
-						
-						// Safety: Prevent infinite loops on corrupted animation IDs
-						if (totalFrames > 500) totalFrames = 500; 
-						
-						if (g_dumpFrameIndex < totalFrames) {
-							GraphicResource *objRes = new GraphicResource(_vm, objResId);
-							if (objRes) {
-								GraphicFrame *objFrame = objRes->getFrame(g_dumpFrameIndex);
-								
-								// Verify frame exists and has pixels
-								if (objFrame && objFrame->surface.getPixels()) {
-									// Filter: 150 pixels gets the cells, church, and huts!
-									if (objFrame->getRect().width() > 150 || objFrame->getRect().height() > 150) {
-										Common::String objName = Common::String::format("sanitarium_dump_pack%d_obj%u_id%u_f%d.png", _packId, g_dumpObjIndex, objResId, g_dumpFrameIndex);
-										Common::Path objPath(objName);
-										
-										if (!Common::File::exists(objPath)) {
-											Common::DumpFile out;
-											if (out.open(objPath)) {
-												Image::writePNG(out, objFrame->surface, pal);
-												out.close();
-												warning("Dumped giant object: %s", objName.c_str());
-											}
-										}
-									}
-								}
-								delete objRes;
-							}
-							
-							g_dumpFrameIndex++;
-							advanced = true; // We successfully processed a frame, let the game breathe!
-							break;
-						}
-					}
-				}
-				
-				// Move to next object
-				g_dumpObjIndex++;
-				g_dumpFrameIndex = 0;
-			}
-			
-			// Are we done?
-			if (g_dumpObjIndex >= _ws->objects.size()) {
-				warning("ASSET DUMP COMPLETE!");
-				g_dumpActive = false;
-				g_dumpStage = 0;
-			}
-		}
-	}
-	// --- END OF ASYNC DUMPER ---
+
 
 	_vm->screen()->clearGraphicsInQueue();
 
