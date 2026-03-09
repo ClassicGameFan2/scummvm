@@ -44,16 +44,7 @@
 #include "asylum/respack.h"
 #include "asylum/staticres.h"
 
-// --- Required for background dumping ---
-#undef PALETTE_SIZE
-#include "image/png.h"
-#include "common/file.h"
-#include "common/path.h"
-// ---------------------------
-
 namespace Asylum {
-
-
 
 #define SCREEN_EDGES 40
 #define SCROLL_STEP 10
@@ -574,102 +565,6 @@ bool Scene::key(const AsylumEvent &evt) {
 		// TODO add support for debug commands
 		warning("[Scene::key] debug command handling not implemented!");
 		break;
-
-	// --- BULLETPROOF ASSET EXTRACTOR (Press 'D' in-game) ---
-	case Common::KEYCODE_d: {
-		warning("--- INITIATING SECURE ASSET DUMP FOR PACK %d ---", _packId);
-		const byte *pal = getScreen()->getPalette();
-
-		// 1. Dump the Main Background
-		if (_ws->backgroundImage != 0) {
-			uint32 bgFrames = GraphicResource::getFrameCount(_vm, _ws->backgroundImage);
-			if (bgFrames > 0) {
-				GraphicResource *bgRes = new GraphicResource(_vm, _ws->backgroundImage);
-				if (bgRes && bgRes->getFrame(0) && bgRes->getFrame(0)->surface.getPixels()) {
-					Common::String bgName = Common::String::format("sanitarium_dump_pack%d_bg%u.png", _packId, _ws->backgroundImage);
-					Common::DumpFile out;
-					if (out.open(Common::Path(bgName))) {
-						Image::writePNG(out, bgRes->getFrame(0)->surface, pal);
-						out.close();
-						warning("[SUCCESS] Dumped main background: %s", bgName.c_str());
-					}
-				}
-				delete bgRes;
-			}
-		}
-
-		// 2. Scan and Dump Objects Safely
-		for (uint i = 0; i < _ws->objects.size(); i++) {
-			
-			// HEARTBEAT
-			Common::Event ev;
-			while (_vm->getEventManager()->pollEvent(ev)) {} 
-			g_system->updateScreen();
-			g_system->delayMillis(5);
-
-			Object *obj = _ws->objects[i];
-			if (!obj) continue;
-
-			Common::Rect *rect = obj->getBoundingRect();
-			if (!rect) continue;
-
-			int objWidth = rect->width();
-			int objHeight = rect->height();
-
-			// --- THE IMPENETRABLE SHIELD ---
-			// We only want massive architectural structures (Rooms, Churches, Cells).
-			// If an object is narrow (< 150) or short (< 150), we silently skip it!
-			// This completely isolates the valid rooms and blocks the fatal ScummVM errors!
-			if (objWidth < 150 || objHeight < 150) {
-				continue; 
-			}
-			// -------------------------------
-
-			ResourceId objResId = obj->getResourceId();
-			
-			if (objResId != 0) {
-				warning("[SCAN] Object %u is a giant structure (%dx%d). Extracting...", i, objWidth, objHeight);
-				
-				uint32 totalFrames = GraphicResource::getFrameCount(_vm, objResId);
-				
-				if (totalFrames > 0 && totalFrames < 2000) {
-					GraphicResource *objRes = new GraphicResource(_vm, objResId);
-					
-					if (objRes) {
-						bool savedSomething = false;
-						for (uint32 f = 0; f < totalFrames; f++) {
-							GraphicFrame *objFrame = objRes->getFrame(f);
-							if (!objFrame) continue;
-							
-							int w = objFrame->surface.w;
-							int h = objFrame->surface.h;
-							int bpp = objFrame->surface.format.bytesPerPixel;
-							
-							// Ensure the internal image data also passes the size check
-							if (objFrame->surface.getPixels() && bpp == 1 && w > 150 && w < 4000 && h > 150 && h < 4000) {
-								Common::String objName = Common::String::format("sanitarium_dump_pack%d_obj%u_id%u_f%d.png", _packId, i, objResId, f);
-								Common::Path objPath(objName);
-								
-								if (!Common::File::exists(objPath)) {
-									Common::DumpFile out;
-									if (out.open(objPath)) {
-										Image::writePNG(out, objFrame->surface, pal);
-										out.close();
-										savedSomething = true;
-									}
-								}
-							}
-						}
-						if (savedSomething) warning("  -> [SAVED] Object %u successfully extracted!", i);
-						delete objRes;
-					}
-				}
-			}
-		}
-		warning("--- SECURE ASSET DUMP COMPLETE! ---");
-		break;
-	}
-	// --- END OF EXTRACTOR ---
 
 	case Common::KEYCODE_LEFTBRACKET:
 		if (evt.kbd.ascii != 123)
@@ -2623,8 +2518,6 @@ bool Scene::drawScene() {
 	if (!_ws)
 		error("[Scene::drawScene] WorldStats not initialized properly!");
 
-
-
 	_vm->screen()->clearGraphicsInQueue();
 
 	if (getSharedData()->getFlag(kFlagSkipDrawScene)) {
@@ -2635,71 +2528,7 @@ bool Scene::drawScene() {
 	}
 
 	// Draw scene background
-	// --- HD BACKGROUND INJECTOR ---
-	static Graphics::Surface *hdBgSurface = nullptr;
-	static uint32 cachedHdPack = 0xFFFFFFFF;
-	static uint32 cachedHdBg = 0xFFFFFFFF;
-
-	// 1. Did we enter a new room? Check if we need to load a new HD background!
-	if (_packId != cachedHdPack || _ws->backgroundImage != cachedHdBg) {
-		cachedHdPack = _packId;
-		cachedHdBg = _ws->backgroundImage;
-		
-		// Clear the old background from RAM
-		if (hdBgSurface) {
-			hdBgSurface->free();
-			delete hdBgSurface;
-			hdBgSurface = nullptr;
-		}
-
-		// Look for the upscaled replacement file
-		Common::String hdName = Common::String::format("sanitarium_hd_pack%d_bg%u.png", _packId, _ws->backgroundImage);
-		Common::Path hdPath(hdName);
-
-		if (Common::File::exists(hdPath)) {
-			Common::File f;
-			if (f.open(hdPath)) {
-				Image::PNGDecoder decoder;
-				if (decoder.loadStream(f)) {
-					
-					const Graphics::Surface *decodedSurf = decoder.getSurface();
-					Graphics::PixelFormat screenFormat = getScreen()->getSurface()->format;
-					
-					hdBgSurface = new Graphics::Surface();
-					
-					// SAFETY: Convert the 32-bit Waifu2x PNG to the engine's native screen format 
-					// so ScummVM doesn't crash when trying to draw it!
-					if (decodedSurf->format != screenFormat) {
-						Graphics::Surface *converted = decodedSurf->convertTo(screenFormat, getScreen()->getPalette());
-						hdBgSurface->copyFrom(*converted);
-						converted->free();
-						delete converted;
-					} else {
-						hdBgSurface->copyFrom(*decodedSurf);
-					}
-					
-					warning("[INJECTOR] Successfully loaded HD Background: %s", hdName.c_str());
-				}
-			}
-		}
-	}
-
-	// 2. Draw the Background (Either HD or Original)
-	if (hdBgSurface && hdBgSurface->getPixels()) {
-		
-		// THE 2X MULTIPLIER: Because the background is 2x larger, the camera scroll 
-		// offsets must be multiplied by 2 so the room stays centered!
-		int drawX = -(_ws->xLeft * 2);
-		int drawY = -(_ws->yTop * 2);
-		
-		// Draw the HD image directly to the screen buffer
-		getScreen()->copyToBackBufferClipped(hdBgSurface, drawX, drawY);
-		
-	} else {
-		// FALLBACK: If no HD file exists, draw the original 1x game background
-		getScreen()->draw(_ws->backgroundImage, 0, Common::Point(-_ws->xLeft, -_ws->yTop), kDrawFlagNone, false);
-	}
-	// --- END HD INJECTOR ---
+	getScreen()->draw(_ws->backgroundImage, 0, Common::Point(-_ws->xLeft, -_ws->yTop), kDrawFlagNone, false);
 
 	// Draw actors on the update list
 	buildUpdateList();
