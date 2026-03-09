@@ -2635,7 +2635,71 @@ bool Scene::drawScene() {
 	}
 
 	// Draw scene background
-	getScreen()->draw(_ws->backgroundImage, 0, Common::Point(-_ws->xLeft, -_ws->yTop), kDrawFlagNone, false);
+	// --- HD BACKGROUND INJECTOR ---
+	static Graphics::Surface *hdBgSurface = nullptr;
+	static uint32 cachedHdPack = 0xFFFFFFFF;
+	static uint32 cachedHdBg = 0xFFFFFFFF;
+
+	// 1. Did we enter a new room? Check if we need to load a new HD background!
+	if (_packId != cachedHdPack || _ws->backgroundImage != cachedHdBg) {
+		cachedHdPack = _packId;
+		cachedHdBg = _ws->backgroundImage;
+		
+		// Clear the old background from RAM
+		if (hdBgSurface) {
+			hdBgSurface->free();
+			delete hdBgSurface;
+			hdBgSurface = nullptr;
+		}
+
+		// Look for the upscaled replacement file
+		Common::String hdName = Common::String::format("sanitarium_hd_pack%d_bg%u.png", _packId, _ws->backgroundImage);
+		Common::Path hdPath(hdName);
+
+		if (Common::File::exists(hdPath)) {
+			Common::File f;
+			if (f.open(hdPath)) {
+				Image::PNGDecoder decoder;
+				if (decoder.loadStream(f)) {
+					
+					const Graphics::Surface *decodedSurf = decoder.getSurface();
+					Graphics::PixelFormat screenFormat = getScreen()->getSurface()->format;
+					
+					hdBgSurface = new Graphics::Surface();
+					
+					// SAFETY: Convert the 32-bit Waifu2x PNG to the engine's native screen format 
+					// so ScummVM doesn't crash when trying to draw it!
+					if (decodedSurf->format != screenFormat) {
+						Graphics::Surface *converted = decodedSurf->convertTo(screenFormat, getScreen()->getPalette());
+						hdBgSurface->copyFrom(*converted);
+						converted->free();
+						delete converted;
+					} else {
+						hdBgSurface->copyFrom(*decodedSurf);
+					}
+					
+					warning("[INJECTOR] Successfully loaded HD Background: %s", hdName.c_str());
+				}
+			}
+		}
+	}
+
+	// 2. Draw the Background (Either HD or Original)
+	if (hdBgSurface && hdBgSurface->getPixels()) {
+		
+		// THE 2X MULTIPLIER: Because the background is 2x larger, the camera scroll 
+		// offsets must be multiplied by 2 so the room stays centered!
+		int drawX = -(_ws->xLeft * 2);
+		int drawY = -(_ws->yTop * 2);
+		
+		// Draw the HD image directly to the screen buffer
+		getScreen()->copyToBackBufferClipped(hdBgSurface, drawX, drawY);
+		
+	} else {
+		// FALLBACK: If no HD file exists, draw the original 1x game background
+		getScreen()->draw(_ws->backgroundImage, 0, Common::Point(-_ws->xLeft, -_ws->yTop), kDrawFlagNone, false);
+	}
+	// --- END HD INJECTOR ---
 
 	// Draw actors on the update list
 	buildUpdateList();
