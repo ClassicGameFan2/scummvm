@@ -610,26 +610,25 @@ bool Scene::key(const AsylumEvent &evt) {
 			Object *obj = _ws->objects[i];
 			if (!obj) continue;
 
-			// --- THE NEW SHIELD ---
-			// Check the object's physical dimensions BEFORE touching the graphics engine!
 			Common::Rect *rect = obj->getBoundingRect();
 			if (!rect) continue;
 
 			int objWidth = rect->width();
 			int objHeight = rect->height();
 
-			// Invisible logic triggers, scripts, and sound emitters have tiny bounding boxes.
-			// By skipping them here, we completely protect the engine from segfaults!
-			if (objWidth < 100 && objHeight < 100) {
-				warning("[SKIP] Object %u is an invisible trigger or tiny prop (%dx%d). Bypassing...", i, objWidth, objHeight);
-				continue;
+			// --- THE IMPENETRABLE SHIELD ---
+			// We only want massive architectural structures (Rooms, Churches, Cells).
+			// If an object is narrow (< 150) or short (< 150), we silently skip it!
+			// This completely isolates the valid rooms and blocks the fatal ScummVM errors!
+			if (objWidth < 150 || objHeight < 150) {
+				continue; 
 			}
-			// ----------------------
+			// -------------------------------
 
 			ResourceId objResId = obj->getResourceId();
 			
 			if (objResId != 0) {
-				warning("[SCAN] Object %u is a large visual structure (%dx%d). Checking ResID: %u...", i, objWidth, objHeight, objResId);
+				warning("[SCAN] Object %u is a giant structure (%dx%d). Extracting...", i, objWidth, objHeight);
 				
 				uint32 totalFrames = GraphicResource::getFrameCount(_vm, objResId);
 				
@@ -646,7 +645,7 @@ bool Scene::key(const AsylumEvent &evt) {
 							int h = objFrame->surface.h;
 							int bpp = objFrame->surface.format.bytesPerPixel;
 							
-							// Final check: Extract architecture (> 150 pixels)
+							// Ensure the internal image data also passes the size check
 							if (objFrame->surface.getPixels() && bpp == 1 && w > 150 && w < 4000 && h > 150 && h < 4000) {
 								Common::String objName = Common::String::format("sanitarium_dump_pack%d_obj%u_id%u_f%d.png", _packId, i, objResId, f);
 								Common::Path objPath(objName);
