@@ -20,9 +20,18 @@
  */
 
 #include "asylum/system/graphics.h"
-
 #include "asylum/asylum.h"
 #include "asylum/respack.h"
+#include "asylum/system/screen.h"
+
+// --- HD REMASTER INCLUDES ---
+#undef PALETTE_SIZE
+#include "image/png.h"
+#include "common/file.h"
+#include "common/path.h"
+#include "common/fs.h"
+#include "common/config-manager.h"
+// ----------------------------
 
 namespace Asylum {
 
@@ -121,6 +130,20 @@ void GraphicResource::init(byte *data, int32 size) {
 		prevOffset = nextOffset;
 	}
 
+	// --- HD REMASTER CONFIGURATION ---
+	int scaleFactor = 1;
+	if (ConfMan.hasKey("InternalUpscalingFactor")) {
+		scaleFactor = ConfMan.getInt("InternalUpscalingFactor");
+		if (scaleFactor < 1) scaleFactor = 1; // Prevent crash on invalid string/zero
+	}
+	
+	bool doDump = ConfMan.hasKey("Asset_Dump") ? ConfMan.getInt("Asset_Dump") != 0 : false;
+	bool doReplace = ConfMan.hasKey("Asset_HD_Replace") ? ConfMan.getInt("Asset_HD_Replace") != 0 : false;
+
+	// Extract the Pack ID from the Resource ID (e.g. 0x80050000 -> Pack 5)
+	uint32 packId = (_resourceId >> 16) & 0xFF;
+	// ---------------------------------
+
 	// Reset pointer
 	dataPtr = data;
 
@@ -142,9 +165,101 @@ void GraphicResource::init(byte *data, int32 size) {
 		dataPtr += 2;
 
 		if (width > 0 && height > 0) {
+			// 1. Create the original 1x surface
 			_frames[i].surface.create(width, height, Graphics::PixelFormat::createFormatCLUT8());
 			_frames[i].surface.copyRectToSurface(dataPtr, width, 0, 0, width, height);
+
+			// 2. DUMP ASSET (Before any scaling happens!)
+			if (doDump) {
+				Common::String dirName = Common::String::format("SanitariumDump/RES%03d", packId);
+				Common::String fileName = Common::String::format("%s/obj_%u_f%d.png", dirName.c_str(), _resourceId, i);
+				Common::Path filePath(fileName);
+				
+				if (!Common::File::exists(filePath)) {
+					Common::DumpFile out;
+					// The 'true' argument tells ScummVM to automatically create the subfolders!
+					if (out.open(filePath, true)) {
+						Image::writePNG(out, _frames[i].surface, _vm->screen()->getPalette());
+						out.close();
+					}
+				}
+			}
+
+			bool replaced = false;
+			Graphics::Surface newSurface;
+			int appliedScale = 1;
+
+			// 3. CHECK FOR HD REPLACEMENT (Waifu2x 8-bit PNG)
+			if (doReplace) {
+				Common::String hdName = Common::String::format("SanitariumHDPack/RES%03d/obj_%u_f%d.png", packId, _resourceId, i);
+				Common::Path hdPath(hdName);
+				
+				if (Common::File::exists(hdPath)) {
+					Common::File f;
+					if (f.open(hdPath)) {
+						Image::PNGDecoder decoder;
+						if (decoder.loadStream(f)) {
+							const Graphics::Surface *decSurf = decoder.getSurface();
+							
+							// Only accept 8-bit Indexed images
+							if (decSurf->format.bytesPerPixel == 1) {
+								newSurface.create(decSurf->w, decSurf->h, Graphics::PixelFormat::createFormatCLUT8());
+								newSurface.copyFrom(*decSurf);
+								replaced = true;
+								
+								// Automatically detect the scale of the custom image
+								appliedScale = decSurf->w / width;
+								if (appliedScale < 1) appliedScale = 1;
+							} else {
+								warning("[HD INJECTOR] Failed: %s is not 8-bit Indexed color!", hdName.c_str());
+							}
+						}
+					}
+				}
+			}
+
+			// 4. INTERNAL NEAREST-NEIGHBOR SCALER (Fallback if no custom HD file exists)
+			if (!replaced && scaleFactor > 1) {
+				int scaledWidth = width * scaleFactor;
+				int scaledHeight = height * scaleFactor;
+				newSurface.create(scaledWidth, scaledHeight, Graphics::PixelFormat::createFormatCLUT8());
+
+				const byte *srcPixels = (const byte *)_frames[i].surface.getPixels();
+				byte *dstPixels = (byte *)newSurface.getPixels();
+
+				// Fast integer point-scaling logic
+				for (int y = 0; y < scaledHeight; y++) {
+					int srcY = y / scaleFactor;
+					const byte *srcRow = srcPixels + (srcY * _frames[i].surface.pitch);
+					byte *dstRow = dstPixels + (y * newSurface.pitch);
+					
+					for (int x = 0; x < scaledWidth; x++) {
+						int srcX = x / scaleFactor;
+						dstRow[x] = srcRow[srcX];
+					}
+				}
+				appliedScale = scaleFactor;
+				replaced = true;
+			}
+
+			// 5. APPLY NEW MEMORY AND SCALE OFFSET GEOMETRY
+			if (replaced) {
+				// Free the original 1x RAM to prevent memory leaks
+				_frames[i].surface.free(); 
+				
+				// Swap in the scaled surface
+				_frames[i].surface = newSurface; 
+				
+				// Scale the sprite's anchor offsets so the engine positions it correctly
+				_frames[i].x *= appliedScale;
+				_frames[i].y *= appliedScale;
+			}
 		}
+	}
+
+	// Finally, scale the overall resource boundary box by the global scale factor
+	if (scaleFactor > 1) {
+		_data.maxWidth *= scaleFactor;
 	}
 }
 
