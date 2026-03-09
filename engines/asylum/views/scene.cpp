@@ -601,6 +601,7 @@ bool Scene::key(const AsylumEvent &evt) {
 		// 2. Scan and Dump Objects Safely
 		for (uint i = 0; i < _ws->objects.size(); i++) {
 			
+			// HEARTBEAT
 			Common::Event ev;
 			while (_vm->getEventManager()->pollEvent(ev)) {} 
 			g_system->updateScreen();
@@ -609,24 +610,34 @@ bool Scene::key(const AsylumEvent &evt) {
 			Object *obj = _ws->objects[i];
 			if (!obj) continue;
 
+			// --- THE NEW SHIELD ---
+			// Check the object's physical dimensions BEFORE touching the graphics engine!
+			Common::Rect *rect = obj->getBoundingRect();
+			if (!rect) continue;
+
+			int objWidth = rect->width();
+			int objHeight = rect->height();
+
+			// Invisible logic triggers, scripts, and sound emitters have tiny bounding boxes.
+			// By skipping them here, we completely protect the engine from segfaults!
+			if (objWidth < 100 && objHeight < 100) {
+				warning("[SKIP] Object %u is an invisible trigger or tiny prop (%dx%d). Bypassing...", i, objWidth, objHeight);
+				continue;
+			}
+			// ----------------------
+
 			ResourceId objResId = obj->getResourceId();
 			
 			if (objResId != 0) {
-				// X-RAY 1: Before checking frame count
-				warning("[X-RAY] Checking Object %u | ResID: %u", i, objResId);
+				warning("[SCAN] Object %u is a large visual structure (%dx%d). Checking ResID: %u...", i, objWidth, objHeight, objResId);
 				
 				uint32 totalFrames = GraphicResource::getFrameCount(_vm, objResId);
-				
-				// X-RAY 2: After checking frame count
-				warning("[X-RAY] Object %u | Frames calculated: %u", i, totalFrames);
 				
 				if (totalFrames > 0 && totalFrames < 2000) {
 					GraphicResource *objRes = new GraphicResource(_vm, objResId);
 					
-					// X-RAY 3: After loading into RAM
-					warning("[X-RAY] Object %u | Resource loaded into RAM", i);
-					
 					if (objRes) {
+						bool savedSomething = false;
 						for (uint32 f = 0; f < totalFrames; f++) {
 							GraphicFrame *objFrame = objRes->getFrame(f);
 							if (!objFrame) continue;
@@ -635,27 +646,23 @@ bool Scene::key(const AsylumEvent &evt) {
 							int h = objFrame->surface.h;
 							int bpp = objFrame->surface.format.bytesPerPixel;
 							
-							// SAFETY LIMITS: Only save 8-bit images (bpp == 1), max size 4000x4000 to prevent overflow
+							// Final check: Extract architecture (> 150 pixels)
 							if (objFrame->surface.getPixels() && bpp == 1 && w > 150 && w < 4000 && h > 150 && h < 4000) {
 								Common::String objName = Common::String::format("sanitarium_dump_pack%d_obj%u_id%u_f%d.png", _packId, i, objResId, f);
 								Common::Path objPath(objName);
 								
 								if (!Common::File::exists(objPath)) {
-									// X-RAY 4: Before writing the PNG
-									warning("[X-RAY] Object %u | Saving Frame %u (Width: %d, Height: %d)...", i, f, w, h);
 									Common::DumpFile out;
 									if (out.open(objPath)) {
 										Image::writePNG(out, objFrame->surface, pal);
 										out.close();
-										warning("  -> [SAVED] %s", objName.c_str());
+										savedSomething = true;
 									}
 								}
 							}
 						}
-						// X-RAY 5: Before memory cleanup
-						warning("[X-RAY] Object %u | Deleting resource...", i);
+						if (savedSomething) warning("  -> [SAVED] Object %u successfully extracted!", i);
 						delete objRes;
-						warning("[X-RAY] Object %u | Resource deleted successfully.", i);
 					}
 				}
 			}
