@@ -173,11 +173,12 @@ void ResourcePack::dumpToPNG(ResourcePackId packId, AsylumEngine *vm) {
 	Common::String markerName = dirName + "/dump_complete.txt";
 
 	// 1. HARD DRIVE SHIELD: Use FSNode to look at the physical write path
-	Common::FSNode markerNode(Common::Path(markerName));
+	Common::Path markerPath(markerName);
+	Common::FSNode markerNode(markerPath);
 	if (markerNode.exists()) {
 		return; // We already dumped this pack, skip instantly!
 	}
-
+	
 	warning("--- AUTO-MASS-DUMP INITIATED FOR PACK %d ---", packId);
 
 	// 2. PALETTE SCANNER & AUTO-LEVELER
