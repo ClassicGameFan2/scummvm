@@ -1,8 +1,5 @@
 /* ScummVM - Graphic Adventure Engine
- *
- * ScummVM is the legal property of its developers, whose names
- * are too numerous to list here. Please refer to the COPYRIGHT
- * file distributed with this source distribution.
+ * (Copyright headers...)
  */
 
 #include "asylum/system/graphics.h"
@@ -15,7 +12,6 @@
 #include "image/png.h"
 #include "common/file.h"
 #include "common/path.h"
-#include "common/fs.h"
 #include "common/config-manager.h"
 #include "common/hashmap.h"
 #include "common/array.h"
@@ -34,9 +30,7 @@ struct CachedHDResource {
 	Common::Array<CachedHDFrame> frames;
 };
 
-// Pointers used to prevent static de-initialization crashes on exit
 static Common::HashMap<uint32, CachedHDResource> *g_hdCache = nullptr;
-static Common::HashMap<uint32, bool> *g_dumpedIds = nullptr;
 // ------------------------------
 
 GraphicResource::GraphicResource(AsylumEngine *engine) : _vm(engine), _resourceId(kResourceNone) {
@@ -69,7 +63,6 @@ bool GraphicResource::load(ResourceId id) {
 
 void GraphicResource::clear() {
 	for (uint32 i = 0; i < _frames.size(); i++) {
-		// This now safely deletes the engine's "photocopy", while our cache stays untouched!
 		_frames[i].surface.free();
 	}
 	_frames.clear();
@@ -112,9 +105,7 @@ void GraphicResource::init(byte *data, int32 size) {
 		prevOffset = nextOffset;
 	}
 
-	// Initialize the caches if they don't exist yet
 	if (!g_hdCache) g_hdCache = new Common::HashMap<uint32, CachedHDResource>();
-	if (!g_dumpedIds) g_dumpedIds = new Common::HashMap<uint32, bool>();
 
 	// =====================================================================
 	// CACHE LOOKUP: Deep Copy from the Vault
@@ -128,12 +119,11 @@ void GraphicResource::init(byte *data, int32 size) {
 			_frames[i].y = hd.frames[i].y;
 			
 			if (hd.frames[i].surf->getPixels()) {
-				// Create a perfect, safe photocopy for the engine to use and delete!
 				_frames[i].surface.create(hd.frames[i].surf->w, hd.frames[i].surf->h, hd.frames[i].surf->format);
 				_frames[i].surface.copyFrom(*hd.frames[i].surf);
 			}
 		}
-		return; // Instant load!
+		return; 
 	}
 	// =====================================================================
 
@@ -143,12 +133,10 @@ void GraphicResource::init(byte *data, int32 size) {
 		scaleFactor = ConfMan.getInt("InternalUpscalingFactor");
 		if (scaleFactor < 1) scaleFactor = 1; 
 	}
-	bool doDump = ConfMan.hasKey("Asset_Dump") ? ConfMan.getInt("Asset_Dump") != 0 : false;
 	bool doReplace = ConfMan.hasKey("Asset_HD_Replace") ? ConfMan.getInt("Asset_HD_Replace") != 0 : false;
 	uint32 packId = (_resourceId >> 16) & 0xFF;
 
 	CachedHDResource newCacheEntry;
-
 	dataPtr = data;
 
 	for (uint32 i = 0; i < frameCount; i++) {
@@ -166,30 +154,14 @@ void GraphicResource::init(byte *data, int32 size) {
 		cacheFrame.y = _frames[i].y;
 
 		if (width > 0 && height > 0) {
-			// 1. Build Original 1x Surface
 			Graphics::Surface origSurf;
 			origSurf.create(width, height, Graphics::PixelFormat::createFormatCLUT8());
 			origSurf.copyRectToSurface(dataPtr, width, 0, 0, width, height);
 
-			// 2. Dump Asset (Only happens ONCE per session)
-			if (doDump && !g_dumpedIds->contains(_resourceId)) {
-				Common::String dirName = Common::String::format("SanitariumDump/RES%03d", packId);
-				Common::String fileName = Common::String::format("%s/obj_%u_f%d.png", dirName.c_str(), _resourceId, i);
-				Common::Path filePath(fileName);
-				
-				if (!Common::File::exists(filePath)) {
-					Common::DumpFile out;
-					if (out.open(filePath, true)) {
-						Image::writePNG(out, origSurf, _vm->screen()->getPalette());
-						out.close();
-					}
-				}
-			}
-
 			bool replaced = false;
 			int appliedScale = 1;
 
-			// 3. Check for HD Replacement
+			// CHECK FOR HD REPLACEMENT
 			if (doReplace) {
 				Common::String hdName = Common::String::format("SanitariumHDPack/RES%03d/obj_%u_f%d.png", packId, _resourceId, i);
 				Common::Path hdPath(hdName);
@@ -206,13 +178,15 @@ void GraphicResource::init(byte *data, int32 size) {
 								replaced = true;
 								appliedScale = decSurf->w / width;
 								if (appliedScale < 1) appliedScale = 1;
+							} else {
+								warning("[HD INJECTOR] Failed: %s is not 8-bit Indexed!", hdName.c_str());
 							}
 						}
 					}
 				}
 			}
 
-			// 4. Internal Nearest-Neighbor Fallback
+			// INTERNAL NEAREST-NEIGHBOR FALLBACK
 			if (!replaced && scaleFactor > 1) {
 				int scaledW = width * scaleFactor;
 				int scaledH = height * scaleFactor;
@@ -232,7 +206,7 @@ void GraphicResource::init(byte *data, int32 size) {
 				appliedScale = scaleFactor;
 			}
 
-			// 5. Finalize Storage
+			// FINALIZE
 			if (!replaced) {
 				cacheFrame.surf->create(width, height, origSurf.format);
 				cacheFrame.surf->copyFrom(origSurf);
@@ -241,7 +215,6 @@ void GraphicResource::init(byte *data, int32 size) {
 				cacheFrame.y *= appliedScale;
 			}
 
-			// Create the engine's active photocopy!
 			_frames[i].x = cacheFrame.x;
 			_frames[i].y = cacheFrame.y;
 			_frames[i].surface.create(cacheFrame.surf->w, cacheFrame.surf->h, cacheFrame.surf->format);
@@ -256,7 +229,6 @@ void GraphicResource::init(byte *data, int32 size) {
 	_data.maxWidth = newCacheEntry.maxWidth;
 
 	(*g_hdCache)[_resourceId] = newCacheEntry;
-	(*g_dumpedIds)[_resourceId] = true;
 }
 
 uint32 GraphicResource::getFrameCount(AsylumEngine *engine, ResourceId id) {
