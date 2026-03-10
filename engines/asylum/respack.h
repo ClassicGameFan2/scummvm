@@ -1,22 +1,5 @@
 /* ScummVM - Graphic Adventure Engine
- *
- * ScummVM is the legal property of its developers, whose names
- * are too numerous to list here. Please refer to the COPYRIGHT
- * file distributed with this source distribution.
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
-
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
-
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- *
+ * (Copyright headers...)
  */
 
 #ifndef ASYLUM_RESPACK_H
@@ -55,6 +38,10 @@ struct ResourceEntry {
 class ResourcePack {
 public:
 	ResourceEntry *get(uint16 index);
+	
+	// --- HD REMASTER HOOK ---
+	void dumpToPNG(ResourcePackId packId, AsylumEngine *vm);
+	// ------------------------
 
 protected:
 	ResourcePack(const Common::Path &filename);
@@ -89,8 +76,6 @@ public:
 	 * @param id The identifier.
 	 */
 	void unload(ResourcePackId id);
-
-	//int count(ResourceId id);
 
 	int getCdNumber() { return _cdNumber; }
 	void setCdNumber(int cdNumber) { _cdNumber = cdNumber; }
