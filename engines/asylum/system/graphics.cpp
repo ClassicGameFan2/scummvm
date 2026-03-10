@@ -14,7 +14,7 @@
 #include "common/path.h"
 #include "common/fs.h"
 #include "common/config-manager.h"
-#include "common/hash-map.h"
+#include "common/hashmap.h"
 #include "common/array.h"
 // ----------------------------
 
