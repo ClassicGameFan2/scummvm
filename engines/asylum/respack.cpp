@@ -9,6 +9,7 @@
 #include "image/png.h"
 #include "common/file.h"
 #include "common/path.h"
+#include "common/fs.h"
 #include "common/config-manager.h"
 #include "asylum/system/graphics.h"
 #include "asylum/system/screen.h"
@@ -163,6 +164,7 @@ ResourceEntry *ResourcePack::get(uint16 index) {
 	return &_resources[index];
 }
 
+
 // =====================================================================
 // AUTO-MASS-DUMPER
 // =====================================================================
@@ -170,13 +172,15 @@ void ResourcePack::dumpToPNG(ResourcePackId packId, AsylumEngine *vm) {
 	Common::String dirName = Common::String::format("SanitariumDump/RES%03d", (int)packId);
 	Common::String markerName = dirName + "/dump_complete.txt";
 
-	// 1. HARD DRIVE SHIELD: If this file exists, we never dump this pack again!
-	if (Common::File::exists(Common::Path(markerName)))
-		return;
+	// 1. HARD DRIVE SHIELD: Use FSNode to look at the physical write path
+	Common::FSNode markerNode(markerName);
+	if (markerNode.exists()) {
+		return; // We already dumped this pack, skip instantly!
+	}
 
 	warning("--- AUTO-MASS-DUMP INITIATED FOR PACK %d ---", packId);
 
-	// 2. PALETTE SCANNER: Find the raw, perfect lighting palette inside the file!
+	// 2. PALETTE SCANNER & AUTO-LEVELER
 	byte localPalette[768];
 	bool hasLocalPalette = false;
 
@@ -189,15 +193,28 @@ void ResourcePack::dumpToPNG(ResourcePackId packId, AsylumEngine *vm) {
 			if (!strncmp((char *)tempData, "D3GR", 4)) {
 				memcpy(localPalette, tempData + 32, 768);
 				hasLocalPalette = true;
+				
+				// FIX DIM COLORS: Auto-level the brightness so it looks good on Windows Desktop!
+				int maxVal = 1;
+				for (int p = 0; p < 768; p++) {
+					if (localPalette[p] > maxVal) maxVal = localPalette[p];
+				}
+				if (maxVal < 255) {
+					float multiplier = 255.0f / (float)maxVal;
+					for (int p = 0; p < 768; p++) {
+						localPalette[p] = (byte)(localPalette[p] * multiplier);
+					}
+				}
+				
 				delete[] tempData;
-				warning("-> Found raw true-color palette for pack %d!", packId);
+				warning("-> Found and Brightness-Corrected raw palette for pack %d!", packId);
 				break;
 			}
 			delete[] tempData;
 		}
 	}
 
-	// 3. MASS EXTRACTION: Loop through every single file in the pack
+	// 3. MASS EXTRACTION
 	for (uint32 i = 0; i < _resources.size(); i++) {
 		if (_resources[i].size > 32 && _resources[i].size != 800) {
 			
@@ -217,13 +234,12 @@ void ResourcePack::dumpToPNG(ResourcePackId packId, AsylumEngine *vm) {
 							Common::String fileName = Common::String::format("%s/obj_%u_f%d.png", dirName.c_str(), resId, f);
 							Common::Path filePath(fileName);
 
-							if (!Common::File::exists(filePath)) {
-								Common::DumpFile out;
-								if (out.open(filePath, true)) {
-									const byte *pal = hasLocalPalette ? localPalette : vm->screen()->getPalette();
-									Image::writePNG(out, frame->surface, pal);
-									out.close();
-								}
+							// Write the PNG file
+							Common::DumpFile out;
+							if (out.open(filePath, true)) {
+								const byte *pal = hasLocalPalette ? localPalette : vm->screen()->getPalette();
+								Image::writePNG(out, frame->surface, pal);
+								out.close();
 							}
 						}
 					}
