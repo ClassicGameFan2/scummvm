@@ -1,5 +1,8 @@
 /* ScummVM - Graphic Adventure Engine
- * (Copyright headers...)
+ *
+ * ScummVM is the legal property of its developers, whose names
+ * are too numerous to list here. Please refer to the COPYRIGHT
+ * file distributed with this source distribution.
  */
 
 #include "asylum/system/graphics.h"
@@ -31,9 +34,9 @@ struct CachedHDResource {
 	Common::Array<CachedHDFrame> frames;
 };
 
-// This vault stores the HD images so we only scale/dump them exactly ONCE!
-static Common::HashMap<uint32, CachedHDResource> g_hdCache;
-static Common::HashMap<uint32, bool> g_dumpedIds;
+// Pointers used to prevent static de-initialization crashes on exit
+static Common::HashMap<uint32, CachedHDResource> *g_hdCache = nullptr;
+static Common::HashMap<uint32, bool> *g_dumpedIds = nullptr;
 // ------------------------------
 
 GraphicResource::GraphicResource(AsylumEngine *engine) : _vm(engine), _resourceId(kResourceNone) {
@@ -66,9 +69,7 @@ bool GraphicResource::load(ResourceId id) {
 
 void GraphicResource::clear() {
 	for (uint32 i = 0; i < _frames.size(); i++) {
-		// Because we are using the Cache, we let the cache manage the memory!
-		// The engine's surface pointer just 'borrows' the pixels.
-		// GraphicFrame's default destructor handles standard surface cleanup.
+		// This now safely deletes the engine's "photocopy", while our cache stays untouched!
 		_frames[i].surface.free();
 	}
 	_frames.clear();
@@ -111,30 +112,30 @@ void GraphicResource::init(byte *data, int32 size) {
 		prevOffset = nextOffset;
 	}
 
+	// Initialize the caches if they don't exist yet
+	if (!g_hdCache) g_hdCache = new Common::HashMap<uint32, CachedHDResource>();
+	if (!g_dumpedIds) g_dumpedIds = new Common::HashMap<uint32, bool>();
+
 	// =====================================================================
-	// CACHE LOOKUP: If we already processed this HD image, skip the math!
+	// CACHE LOOKUP: Deep Copy from the Vault
 	// =====================================================================
-	if (g_hdCache.contains(_resourceId)) {
-		CachedHDResource &hd = g_hdCache[_resourceId];
+	if (g_hdCache->contains(_resourceId)) {
+		CachedHDResource &hd = (*g_hdCache)[_resourceId];
 		_data.maxWidth = hd.maxWidth;
 		
 		for (uint32 i = 0; i < frameCount; i++) {
 			_frames[i].x = hd.frames[i].x;
 			_frames[i].y = hd.frames[i].y;
 			
-			// Borrow the pixels from the Vault without copying them!
 			if (hd.frames[i].surf->getPixels()) {
-				_frames[i].surface.init(
-					hd.frames[i].surf->w, hd.frames[i].surf->h, 
-					hd.frames[i].surf->pitch, hd.frames[i].surf->getPixels(), 
-					hd.frames[i].surf->format
-				);
+				// Create a perfect, safe photocopy for the engine to use and delete!
+				_frames[i].surface.create(hd.frames[i].surf->w, hd.frames[i].surf->h, hd.frames[i].surf->format);
+				_frames[i].surface.copyFrom(*hd.frames[i].surf);
 			}
 		}
 		return; // Instant load!
 	}
 	// =====================================================================
-
 
 	// --- HD CONFIGURATION ---
 	int scaleFactor = 1;
@@ -171,7 +172,7 @@ void GraphicResource::init(byte *data, int32 size) {
 			origSurf.copyRectToSurface(dataPtr, width, 0, 0, width, height);
 
 			// 2. Dump Asset (Only happens ONCE per session)
-			if (doDump && !g_dumpedIds.contains(_resourceId)) {
+			if (doDump && !g_dumpedIds->contains(_resourceId)) {
 				Common::String dirName = Common::String::format("SanitariumDump/RES%03d", packId);
 				Common::String fileName = Common::String::format("%s/obj_%u_f%d.png", dirName.c_str(), _resourceId, i);
 				Common::Path filePath(fileName);
@@ -240,22 +241,22 @@ void GraphicResource::init(byte *data, int32 size) {
 				cacheFrame.y *= appliedScale;
 			}
 
-			// Bind to the engine's active frame safely
+			// Create the engine's active photocopy!
 			_frames[i].x = cacheFrame.x;
 			_frames[i].y = cacheFrame.y;
-			_frames[i].surface.init(cacheFrame.surf->w, cacheFrame.surf->h, cacheFrame.surf->pitch, cacheFrame.surf->getPixels(), cacheFrame.surf->format);
+			_frames[i].surface.create(cacheFrame.surf->w, cacheFrame.surf->h, cacheFrame.surf->format);
+			_frames[i].surface.copyFrom(*cacheFrame.surf);
 
 			origSurf.free();
 		}
 		newCacheEntry.frames.push_back(cacheFrame);
 	}
 
-	// Complete the caching process
 	newCacheEntry.maxWidth = _data.maxWidth * scaleFactor;
 	_data.maxWidth = newCacheEntry.maxWidth;
 
-	g_hdCache[_resourceId] = newCacheEntry;
-	g_dumpedIds[_resourceId] = true;
+	(*g_hdCache)[_resourceId] = newCacheEntry;
+	(*g_dumpedIds)[_resourceId] = true;
 }
 
 uint32 GraphicResource::getFrameCount(AsylumEngine *engine, ResourceId id) {
