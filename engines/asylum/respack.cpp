@@ -1,25 +1,18 @@
 /* ScummVM - Graphic Adventure Engine
- *
- * ScummVM is the legal property of its developers, whose names
- * are too numerous to list here. Please refer to the COPYRIGHT
- * file distributed with this source distribution.
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
-
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
-
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- *
+ * (Copyright headers...)
  */
 
 #include "asylum/respack.h"
+
+// --- HD REMASTER INCLUDES ---
+#undef PALETTE_SIZE
+#include "image/png.h"
+#include "common/file.h"
+#include "common/path.h"
+#include "common/config-manager.h"
+#include "asylum/system/graphics.h"
+#include "asylum/system/screen.h"
+// ----------------------------
 
 namespace Asylum {
 
@@ -39,6 +32,101 @@ const struct {
 	{2, 0x8004097D,   524576}, {1, 0x8004097F,    52574}, {2, 0x80040983,   289832},
 };
 
+// =====================================================================
+// AUTO-MASS-DUMPER
+// =====================================================================
+static void dumpPackToPNG(ResourcePack *pack, ResourcePackId packId, AsylumEngine *vm) {
+	Common::String dirName = Common::String::format("SanitariumDump/RES%03d", (int)packId);
+	Common::String markerName = dirName + "/dump_complete.txt";
+
+	// 1. HARD DRIVE SHIELD: If this file exists, we never dump this pack again!
+	if (Common::File::exists(Common::Path(markerName)))
+		return;
+
+	warning("--- AUTO-MASS-DUMP INITIATED FOR PACK %d ---", packId);
+
+	// 2. PALETTE SCANNER: Find the raw, perfect lighting palette inside the file!
+	byte localPalette[768];
+	bool hasLocalPalette = false;
+
+	for (uint32 i = 0; i < pack->_resources.size(); i++) {
+		if (pack->_resources[i].size == 800) {
+			byte *tempData = new byte[800];
+			pack->_packFile.seek(pack->_resources[i].offset, SEEK_SET);
+			pack->_packFile.read(tempData, 800);
+			
+			if (!strncmp((char *)tempData, "D3GR", 4)) {
+				// We found it! Skip the 32-byte header and copy the 768-byte palette
+				memcpy(localPalette, tempData + 32, 768);
+				hasLocalPalette = true;
+				delete[] tempData;
+				warning("-> Found raw true-color palette for pack %d!", packId);
+				break;
+			}
+			delete[] tempData;
+		}
+	}
+
+	// 3. MASS EXTRACTION: Loop through every single file in the pack
+	for (uint32 i = 0; i < pack->_resources.size(); i++) {
+		if (pack->_resources[i].size > 32 && pack->_resources[i].size != 800) {
+			
+			// Peek at the magic bytes
+			pack->_packFile.seek(pack->_resources[i].offset, SEEK_SET);
+			char magic[5] = {0};
+			pack->_packFile.read(magic, 4);
+
+			// If it is a graphic, extract it!
+			if (!strncmp(magic, "D3GR", 4)) {
+				ResourceId resId = (ResourceId)((((packId) << 16) + 0x80000000) + i);
+				
+				GraphicResource *res = new GraphicResource(vm, resId);
+				if (res && res->count() > 0 && res->count() < 2000) {
+					for (uint32 f = 0; f < res->count(); f++) {
+						GraphicFrame *frame = res->getFrame(f);
+						
+						if (frame && frame->surface.getPixels() && frame->surface.format.bytesPerPixel == 1) {
+							Common::String fileName = Common::String::format("%s/obj_%u_f%d.png", dirName.c_str(), resId, f);
+							Common::Path filePath(fileName);
+
+							if (!Common::File::exists(filePath)) {
+								Common::DumpFile out;
+								if (out.open(filePath, true)) {
+									// Use the raw file palette if available, otherwise use the screen
+									const byte *pal = hasLocalPalette ? localPalette : vm->screen()->getPalette();
+									Image::writePNG(out, frame->surface, pal);
+									out.close();
+								}
+							}
+						}
+					}
+				}
+				delete res;
+
+				// RAM SHIELD: Free the raw binary data immediately so we don't blow up the RAM!
+				if (pack->_resources[i].data) {
+					delete[] pack->_resources[i].data;
+					pack->_resources[i].data = nullptr;
+				}
+			}
+		}
+
+		// Keep the OS alive so the window doesn't freeze
+		Common::Event ev;
+		while (vm->getEventManager()->pollEvent(ev)) {}
+	}
+
+	// 4. WRITE THE MARKER FILE
+	Common::DumpFile marker;
+	if (marker.open(Common::Path(markerName), true)) {
+		marker.write("DUMP COMPLETE", 13);
+		marker.close();
+	}
+	warning("--- MASS DUMP COMPLETE FOR PACK %d ---", packId);
+}
+// =====================================================================
+
+
 //////////////////////////////////////////////////////////////////////////
 // ResourceManager
 //////////////////////////////////////////////////////////////////////////
@@ -57,16 +145,13 @@ ResourceEntry *ResourceManager::get(ResourceId id) {
 	ResourcePackId packId = RESOURCE_PACK(id);
 	uint16 index = RESOURCE_INDEX(id);
 
-	// Check if we need to load a music pack
 	bool isMusicPack = (packId == kResourcePackMusic);
 
-	// Check that a music pack has been set
 	if (isMusicPack && _musicPackId == kResourcePackInvalid)
 		error("[ResourceManager::get] Current music pack Id has not been set!");
 
 	ResourceCache *cache = isMusicPack ? &_music : &_resources;
 
-	// Try getting the resource pack
 	if (!cache->contains(packId)) {
 		ResourcePack *pack;
 
@@ -88,7 +173,6 @@ ResourceEntry *ResourceManager::get(ResourceId id) {
 
 				pack = new ResourcePack(Common::Path(Common::String::format("res.%01d%02d", _cdNumber, packId)));
 
-				// WORKAROUND to support combined resource packs (used by GOG and Steam versions)
 				if (pack->_packFile.size() == 299872422)
 					for (int i = 0; i < ARRAYSIZE(patchedSizes); i++)
 						if (_cdNumber == patchedSizes[i].cdNumber)
@@ -99,6 +183,12 @@ ResourceEntry *ResourceManager::get(ResourceId id) {
 		}
 
 		cache->setVal(packId, pack);
+
+		// --- HD AUTO-DUMPER HOOK ---
+		if (!isMusicPack && ConfMan.hasKey("Asset_Dump") && ConfMan.getInt("Asset_Dump") != 0) {
+			dumpPackToPNG(pack, packId, _vm);
+		}
+		// ---------------------------
 	}
 
 	return cache->getVal(packId)->get(index);
@@ -145,7 +235,6 @@ void ResourcePack::init(const Common::Path &filename) {
 		ResourceEntry entry;
 		entry.offset = prevOffset;
 
-		// Read the offset of the next entry to determine the size of this one
 		nextOffset = (i < entryCount - 1) ? _packFile.readUint32LE() : (uint32)_packFile.size();
 		entry.size = (nextOffset > 0) ? nextOffset - prevOffset : (uint32)_packFile.size() - prevOffset;
 		entry.data = nullptr;
@@ -161,7 +250,6 @@ ResourceEntry *ResourcePack::get(uint16 index) {
 		return nullptr;
 
 	if (!_resources[index].data) {
-		// Load the requested resource if it's not loaded already
 		_packFile.seek(_resources[index].offset, SEEK_SET);
 		_resources[index].data = new byte[_resources[index].size];
 		_packFile.read(_resources[index].data, _resources[index].size);
