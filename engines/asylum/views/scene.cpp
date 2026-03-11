@@ -1238,11 +1238,11 @@ void Scene::updateCoordinates() {
 	if (yTop < sceneRect.top)
 		yTop = _ws->yTop = sceneRect.top;
 
-	if ((xLeft + 639) > sceneRect.right)
-		xLeft = _ws->xLeft = sceneRect.right - 639;
+	if ((xLeft + ASYLUM_SCREEN_WIDTH - 1) > sceneRect.right)
+		xLeft = _ws->xLeft = sceneRect.right - ASYLUM_SCREEN_WIDTH - 1;
 
-	if ((yTop + 479) > sceneRect.bottom)
-		yTop = _ws->yTop = sceneRect.bottom - 479;
+	if ((yTop + ASYLUM_SCREEN_HEIGHT - 1) > sceneRect.bottom)
+		yTop = _ws->yTop = sceneRect.bottom - ASYLUM_SCREEN_HEIGHT - 1;
 
 	// XXX dword_44E1EC is set to 2 at this point if the scene coordinates
 	// have changed, but that variable is never used anywhere else
