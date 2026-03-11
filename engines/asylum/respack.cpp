@@ -178,10 +178,10 @@ void ResourcePack::dumpToPNG(ResourcePackId packId, AsylumEngine *vm) {
 	if (markerNode.exists()) {
 		return; // We already dumped this pack, skip instantly!
 	}
-	
+
 	warning("--- AUTO-MASS-DUMP INITIATED FOR PACK %d ---", packId);
 
-	// 2. PALETTE SCANNER & AUTO-LEVELER
+	// 2. PALETTE SCANNER & ORIGINAL 1998 GAMMA CURVE
 	byte localPalette[768];
 	bool hasLocalPalette = false;
 
@@ -192,23 +192,38 @@ void ResourcePack::dumpToPNG(ResourcePackId packId, AsylumEngine *vm) {
 			_packFile.read(tempData, 800);
 			
 			if (!strncmp((char *)tempData, "D3GR", 4)) {
-				memcpy(localPalette, tempData + 32, 768);
-				hasLocalPalette = true;
+				// Copy the raw 6-bit palette
+				byte *rawData = tempData + 32;
 				
-				// FIX DIM COLORS: Auto-level the brightness so it looks good on Windows Desktop!
-				int maxVal = 1;
-				for (int p = 0; p < 768; p++) {
-					if (localPalette[p] > maxVal) maxVal = localPalette[p];
-				}
-				if (maxVal < 255) {
-					float multiplier = 255.0f / (float)maxVal;
-					for (int p = 0; p < 768; p++) {
-						localPalette[p] = (byte)(localPalette[p] * multiplier);
+				// Apply the exact Gamma math from Screen::setPaletteGamma!
+				// ScummVM loads default gamma at level 10 (stored in ConfMan as "gammaLevel")
+				// We simulate a default level of 10 for a beautifully lit export.
+				int gammaSetting = 10;
+				
+				byte *target = localPalette;
+				for (int p = 0; p < 256; p++) {
+					byte color = 0;
+					if (rawData[0] > 0) color = rawData[0];
+					if (rawData[1] > color) color = rawData[1];
+					if (rawData[2] > color) color = rawData[2];
+
+					int gamma = color + (gammaSetting * (63 - color) + 31) / 63;
+
+					if (gamma && color != 0) {
+						if (rawData[0]) target[0] = (byte)(4 * ((color >> 1) + rawData[0] * gamma) / color); else target[0] = 0;
+						if (rawData[1]) target[1] = (byte)(4 * ((color >> 1) + rawData[1] * gamma) / color); else target[1] = 0;
+						if (rawData[2]) target[2] = (byte)(4 * ((color >> 1) + rawData[2] * gamma) / color); else target[2] = 0;
+					} else {
+						target[0] = 0; target[1] = 0; target[2] = 0;
 					}
+
+					target += 3;
+					rawData += 3;
 				}
 				
+				hasLocalPalette = true;
 				delete[] tempData;
-				warning("-> Found and Brightness-Corrected raw palette for pack %d!", packId);
+				warning("-> Found and applied Native 1998 Gamma Curve to palette for pack %d!", packId);
 				break;
 			}
 			delete[] tempData;
@@ -235,12 +250,13 @@ void ResourcePack::dumpToPNG(ResourcePackId packId, AsylumEngine *vm) {
 							Common::String fileName = Common::String::format("%s/obj_%u_f%d.png", dirName.c_str(), resId, f);
 							Common::Path filePath(fileName);
 
-							// Write the PNG file
-							Common::DumpFile out;
-							if (out.open(filePath, true)) {
-								const byte *pal = hasLocalPalette ? localPalette : vm->screen()->getPalette();
-								Image::writePNG(out, frame->surface, pal);
-								out.close();
+							if (!Common::File::exists(filePath)) {
+								Common::DumpFile out;
+								if (out.open(filePath, true)) {
+									const byte *pal = hasLocalPalette ? localPalette : vm->screen()->getPalette();
+									Image::writePNG(out, frame->surface, pal);
+									out.close();
+								}
 							}
 						}
 					}
