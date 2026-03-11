@@ -12,6 +12,7 @@
 #include "image/png.h"
 #include "common/file.h"
 #include "common/path.h"
+#include "common/fs.h"
 #include "common/config-manager.h"
 #include "common/hashmap.h"
 #include "common/array.h"
@@ -166,9 +167,12 @@ void GraphicResource::init(byte *data, int32 size) {
 				Common::String hdName = Common::String::format("SanitariumHDPack/RES%03d/obj_%u_f%d.png", packId, _resourceId, i);
 				Common::Path hdPath(hdName);
 				
-				if (Common::File::exists(hdPath)) {
+				// Use FSNode to bypass virtual sandbox and read relative to EXE!
+				Common::FSNode hdNode(hdPath);
+				
+				if (hdNode.exists()) {
 					Common::File f;
-					if (f.open(hdPath)) {
+					if (f.open(hdNode)) {
 						Image::PNGDecoder decoder;
 						if (decoder.loadStream(f)) {
 							const Graphics::Surface *decSurf = decoder.getSurface();
