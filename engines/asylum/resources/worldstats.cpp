@@ -3,20 +3,6 @@
  * ScummVM is the legal property of its developers, whose names
  * are too numerous to list here. Please refer to the COPYRIGHT
  * file distributed with this source distribution.
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
-
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
-
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- *
  */
 
 #include "asylum/resources/worldstats.h"
@@ -27,7 +13,9 @@
 
 #include "asylum/asylum.h"
 
+// --- HD REMASTER INCLUDES ---
 #include "common/config-manager.h"
+// ----------------------------
 
 namespace Asylum {
 
@@ -312,6 +300,7 @@ load_inventory:
 		field_E8628[i] = stream->readUint32LE();
 
 	for (int32 i = 0; i < ARRAYSIZE(wheels); i++) {
+
 		ObjectId id = (ObjectId)stream->readUint32LE();
 
 		if (id == 0)
@@ -324,6 +313,43 @@ load_inventory:
 
 	for (int32 i = 0; i < ARRAYSIZE(field_E8660); i++)
 		field_E8660[i] = stream->readUint32LE();
+
+	// ==========================================================
+	// --- HD REMASTER SCALING: WORLD STATS ---
+	int scaleFactor = 1;
+	if (ConfMan.hasKey("InternalUpscalingFactor")) {
+		scaleFactor = ConfMan.getInt("InternalUpscalingFactor");
+		if (scaleFactor < 1) scaleFactor = 1;
+	}
+
+	if (scaleFactor > 1) {
+		width *= scaleFactor;
+		height *= scaleFactor;
+		xLeft *= scaleFactor;
+		yTop *= scaleFactor;
+
+		boundingRect.left *= scaleFactor;
+		boundingRect.top *= scaleFactor;
+		boundingRect.right *= scaleFactor;
+		boundingRect.bottom *= scaleFactor;
+
+		for (int i = 0; i < ARRAYSIZE(coordinates); i++) {
+			coordinates[i] *= scaleFactor;
+		}
+
+		for (int i = 0; i < ARRAYSIZE(sceneRects); i++) {
+			sceneRects[i].left *= scaleFactor;
+			sceneRects[i].top *= scaleFactor;
+			sceneRects[i].right *= scaleFactor;
+			sceneRects[i].bottom *= scaleFactor;
+		}
+
+		for (uint32 i = 0; i < numAmbientSounds; i++) {
+			ambientSounds[i].point.x *= scaleFactor;
+			ambientSounds[i].point.y *= scaleFactor;
+		}
+	}
+	// ==========================================================
 }
 
 void WorldStats::saveLoadWithSerializer(Common::Serializer &s) {
@@ -500,46 +526,10 @@ void WorldStats::saveLoadWithSerializer(Common::Serializer &s) {
 		}
 	}
 
-	tickCount1 = stream->readUint32LE();
+	s.syncAsUint32LE(tickCount1);
 
 	for (int32 i = 0; i < ARRAYSIZE(field_E8660); i++)
-		field_E8660[i] = stream->readUint32LE();
-
-	// --- HD REMASTER SCALING: WORLD STATS ---
-	int scaleFactor = 1;
-	if (ConfMan.hasKey("InternalUpscalingFactor")) {
-		scaleFactor = ConfMan.getInt("InternalUpscalingFactor");
-		if (scaleFactor < 1) scaleFactor = 1;
-	}
-
-	if (scaleFactor > 1) {
-		width *= scaleFactor;
-		height *= scaleFactor;
-		xLeft *= scaleFactor;
-		yTop *= scaleFactor;
-
-		boundingRect.left *= scaleFactor;
-		boundingRect.top *= scaleFactor;
-		boundingRect.right *= scaleFactor;
-		boundingRect.bottom *= scaleFactor;
-
-		for (int i = 0; i < ARRAYSIZE(coordinates); i++) {
-			coordinates[i] *= scaleFactor;
-		}
-
-		for (int i = 0; i < ARRAYSIZE(sceneRects); i++) {
-			sceneRects[i].left *= scaleFactor;
-			sceneRects[i].top *= scaleFactor;
-			sceneRects[i].right *= scaleFactor;
-			sceneRects[i].bottom *= scaleFactor;
-		}
-
-		for (uint32 i = 0; i < numAmbientSounds; i++) {
-			ambientSounds[i].point.x *= scaleFactor;
-			ambientSounds[i].point.y *= scaleFactor;
-		}
-	}
-	// ----------------------------------------
+		s.syncAsUint32LE(field_E8660[i]);
 }
 
 //////////////////////////////////////////////////////////////////////////
