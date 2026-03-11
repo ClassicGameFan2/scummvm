@@ -27,6 +27,8 @@
 
 #include "asylum/asylum.h"
 
+#include "common/config-manager.h"
+
 namespace Asylum {
 
 WorldStats::WorldStats(AsylumEngine *engine) : _vm(engine) {
@@ -498,10 +500,46 @@ void WorldStats::saveLoadWithSerializer(Common::Serializer &s) {
 		}
 	}
 
-	s.syncAsUint32LE(tickCount1);
+	tickCount1 = stream->readUint32LE();
 
 	for (int32 i = 0; i < ARRAYSIZE(field_E8660); i++)
-		s.syncAsUint32LE(field_E8660[i]);
+		field_E8660[i] = stream->readUint32LE();
+
+	// --- HD REMASTER SCALING: WORLD STATS ---
+	int scaleFactor = 1;
+	if (ConfMan.hasKey("InternalUpscalingFactor")) {
+		scaleFactor = ConfMan.getInt("InternalUpscalingFactor");
+		if (scaleFactor < 1) scaleFactor = 1;
+	}
+
+	if (scaleFactor > 1) {
+		width *= scaleFactor;
+		height *= scaleFactor;
+		xLeft *= scaleFactor;
+		yTop *= scaleFactor;
+
+		boundingRect.left *= scaleFactor;
+		boundingRect.top *= scaleFactor;
+		boundingRect.right *= scaleFactor;
+		boundingRect.bottom *= scaleFactor;
+
+		for (int i = 0; i < ARRAYSIZE(coordinates); i++) {
+			coordinates[i] *= scaleFactor;
+		}
+
+		for (int i = 0; i < ARRAYSIZE(sceneRects); i++) {
+			sceneRects[i].left *= scaleFactor;
+			sceneRects[i].top *= scaleFactor;
+			sceneRects[i].right *= scaleFactor;
+			sceneRects[i].bottom *= scaleFactor;
+		}
+
+		for (uint32 i = 0; i < numAmbientSounds; i++) {
+			ambientSounds[i].point.x *= scaleFactor;
+			ambientSounds[i].point.y *= scaleFactor;
+		}
+	}
+	// ----------------------------------------
 }
 
 //////////////////////////////////////////////////////////////////////////
