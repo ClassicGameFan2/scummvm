@@ -52,8 +52,13 @@ struct ADGameDescription;
 
 namespace Asylum {
 
+// --- HD REMASTER GLOBAL DEFINITIONS ---
 extern int ASYLUM_SCREEN_WIDTH;
 extern int ASYLUM_SCREEN_HEIGHT;
+extern int LOGICAL_WIDTH;
+extern int LOGICAL_HEIGHT;
+extern int ASYLUM_SCALE_FACTOR;
+// --------------------------------------
 
 class Cursor;
 class Encounter;
