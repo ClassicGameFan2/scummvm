@@ -1,12 +1,25 @@
 /* ScummVM - Graphic Adventure Engine
- * (Copyright headers...)
+ *
+ * ScummVM is the legal property of its developers, whose names
+ * are too numerous to list here. Please refer to the COPYRIGHT
+ * file distributed with this source distribution.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ *
  */
 
 #include "asylum/resources/polygons.h"
-
-// --- HD REMASTER INCLUDES ---
-#include "common/config-manager.h"
-// ----------------------------
 
 namespace Asylum {
 
@@ -14,10 +27,13 @@ namespace Asylum {
 // Contains
 //////////////////////////////////////////////////////////////////////////
 bool Polygon::contains(const Common::Point &point) {
+	// Copied from backends/vkeybd/polygon.cpp
 	bool  yflag0;
 	bool  yflag1;
 	bool inside_flag = false;
 
+	// if no points are defined, an intersect check will fail
+	// (count - 1 would trigger an assertion in vtx0)
 	if (points.size() == 0)
 		return false;
 
@@ -86,29 +102,6 @@ void Polygons::load(Common::SeekableReadStream *stream) {
 
 		_entries.push_back(poly);
 	}
-
-	// --- HD REMASTER: SCALE ALL POLYGONS ---
-	int scaleFactor = 1;
-	if (ConfMan.hasKey("InternalUpscalingFactor")) {
-		scaleFactor = ConfMan.getInt("InternalUpscalingFactor");
-		if (scaleFactor < 1) scaleFactor = 1;
-	}
-
-	if (scaleFactor > 1) {
-		for (uint32 i = 0; i < _entries.size(); i++) {
-			// Scale individual collision points
-			for (uint32 pt = 0; pt < _entries[i].points.size(); pt++) {
-				_entries[i].points[pt].x *= scaleFactor;
-				_entries[i].points[pt].y *= scaleFactor;
-			}
-			// Scale the bounding box of the polygon
-			_entries[i].boundingRect.left *= scaleFactor;
-			_entries[i].boundingRect.top *= scaleFactor;
-			_entries[i].boundingRect.right *= scaleFactor;
-			_entries[i].boundingRect.bottom *= scaleFactor;
-		}
-	}
-	// ---------------------------------------
 }
 
 } // end of namespace Asylum
