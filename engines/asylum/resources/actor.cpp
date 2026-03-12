@@ -39,9 +39,6 @@
 #include "asylum/asylum.h"
 #include "asylum/staticres.h"
 
-// --- HD REMASTER INCLUDES ---
-#include "common/config-manager.h"
-// ----------------------------
 
 namespace Asylum {
 
@@ -208,52 +205,6 @@ void Actor::load(Common::SeekableReadStream *stream) {
 	_field_998            = stream->readSint32LE();
 	_field_99C            = stream->readSint32LE();
 	_field_9A0            = stream->readSint32LE();
-	
-	// ==========================================================
-	// --- HD REMASTER SCALING: ACTORS ---
-	int scaleFactor = 1;
-	if (ConfMan.hasKey("InternalUpscalingFactor")) {
-		scaleFactor = ConfMan.getInt("InternalUpscalingFactor");
-		if (scaleFactor < 1) scaleFactor = 1;
-	}
-
-	if (scaleFactor > 1) {
-		// Scale starting coordinates
-		_point.x *= scaleFactor;
-		_point.y *= scaleFactor;
-		_point1.x *= scaleFactor;
-		_point1.y *= scaleFactor;
-		_point2.x *= scaleFactor;
-		_point2.y *= scaleFactor;
-
-		// Scale bounding/collision box
-		_boundingRect.left *= scaleFactor;
-		_boundingRect.top *= scaleFactor;
-		_boundingRect.right *= scaleFactor;
-		_boundingRect.bottom *= scaleFactor;
-
-		// Scale interaction and math parameters
-		_field_948 *= scaleFactor;
-		_field_94C *= scaleFactor;
-
-		_nextPosition.x *= scaleFactor;
-		_nextPosition.y *= scaleFactor;
-		_nextPositionOffset.x *= scaleFactor;
-		_nextPositionOffset.y *= scaleFactor;
-		
-		_field_994 *= scaleFactor;
-		_field_998 *= scaleFactor;
-		_field_99C *= scaleFactor;
-		_field_9A0 *= scaleFactor;
-
-		// Scale the animation stride distances so he doesn't "moonwalk"
-		for (int i = 0; i < 20; i++) {
-			_distancesEO[i] *= scaleFactor;
-			_distancesNS[i] *= scaleFactor;
-			_distancesNSEO[i] *= scaleFactor;
-		}
-	}
-	// ==========================================================
 }
 
 void Actor::saveLoadWithSerializer(Common::Serializer &s) {
