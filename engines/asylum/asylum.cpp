@@ -57,8 +57,13 @@
 
 namespace Asylum {
 
+// --- HD REMASTER INITIALIZATION ---
 int ASYLUM_SCREEN_WIDTH = 640;
 int ASYLUM_SCREEN_HEIGHT = 480;
+int LOGICAL_WIDTH = 640;
+int LOGICAL_HEIGHT = 480;
+int ASYLUM_SCALE_FACTOR = 1;
+// ----------------------------------
 
 const char *const engineKeyMapId = "asylum";
 const char *const resviewerKeyMapId = "asylum-resviewer";
@@ -118,16 +123,30 @@ AsylumEngine::~AsylumEngine() {
 
 Common::Error AsylumEngine::run() {
 
-	// Check scummvm.ini for custom resolution
-	if (ConfMan.hasKey("asylum_width")) ASYLUM_SCREEN_WIDTH = ConfMan.getInt("asylum_width");
-	if (ConfMan.hasKey("asylum_height")) ASYLUM_SCREEN_HEIGHT = ConfMan.getInt("asylum_height");
-	
-	// Safety check: Don't let it go smaller than the original game or it will definitely crash
-	if (ASYLUM_SCREEN_WIDTH < 640) ASYLUM_SCREEN_WIDTH = 640;
-	if (ASYLUM_SCREEN_HEIGHT < 480) ASYLUM_SCREEN_HEIGHT = 480;
-	
-	// Initialize the graphics
+	// --- HD REMASTER SCALING LOGIC ---
+	// 1. Get the Scale Factor (Default to 1 if missing or invalid)
+	ASYLUM_SCALE_FACTOR = ConfMan.hasKey("InternalUpscalingFactor") ? ConfMan.getInt("InternalUpscalingFactor") : 1;
+	if (ASYLUM_SCALE_FACTOR < 1) ASYLUM_SCALE_FACTOR = 1;
+
+	// 2. Calculate the absolute minimum safety nets
+	int minWidth = 640 * ASYLUM_SCALE_FACTOR;
+	int minHeight = 480 * ASYLUM_SCALE_FACTOR;
+
+	// 3. Get the Requested Resolution (Default to minimums if missing)
+	ASYLUM_SCREEN_WIDTH = ConfMan.hasKey("asylum_width") ? ConfMan.getInt("asylum_width") : minWidth;
+	ASYLUM_SCREEN_HEIGHT = ConfMan.hasKey("asylum_height") ? ConfMan.getInt("asylum_height") : minHeight;
+
+	// 4. Auto-Correct: Force it to minimums if the user typed something too small
+	if (ASYLUM_SCREEN_WIDTH < minWidth) ASYLUM_SCREEN_WIDTH = minWidth;
+	if (ASYLUM_SCREEN_HEIGHT < minHeight) ASYLUM_SCREEN_HEIGHT = minHeight;
+
+	// 5. Calculate the 1x Viewport for the Game Brain
+	LOGICAL_WIDTH = ASYLUM_SCREEN_WIDTH / ASYLUM_SCALE_FACTOR;
+	LOGICAL_HEIGHT = ASYLUM_SCREEN_HEIGHT / ASYLUM_SCALE_FACTOR;
+
+	// 6. Initialize physical HD Window!
 	initGraphics(ASYLUM_SCREEN_WIDTH, ASYLUM_SCREEN_HEIGHT);
+	// ---------------------------------
 
 	// Create debugger. It requires GFX to be initialized
 	setDebugger(new Console(this));
