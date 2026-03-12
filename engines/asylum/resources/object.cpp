@@ -33,6 +33,10 @@
 #include "asylum/asylum.h"
 #include "asylum/respack.h"
 
+// --- HD REMASTER INCLUDES ---
+#include "common/config-manager.h"
+// ----------------------------
+
 namespace Asylum {
 
 Object::Object(AsylumEngine *engine) : x(0), y(0), flags(0), actionType(0),
@@ -115,10 +119,40 @@ void Object::load(Common::SeekableReadStream *stream) {
 
 	_soundResourceId = (ResourceId)stream->readSint32LE();
 
-	if (_vm->checkGameVersion("Demo"))
-		return;
+	if (!_vm->checkGameVersion("Demo")) {
+		_field_6A4       = (ActorDirection)stream->readSint32LE();
+	}
 
-	_field_6A4       = (ActorDirection)stream->readSint32LE();
+	// ==========================================================
+	// --- HD REMASTER SCALING: OBJECTS ---
+	int scaleFactor = 1;
+	if (ConfMan.hasKey("InternalUpscalingFactor")) {
+		scaleFactor = ConfMan.getInt("InternalUpscalingFactor");
+		if (scaleFactor < 1) scaleFactor = 1;
+	}
+
+	if (scaleFactor > 1) {
+		// Scale starting coordinates
+		x *= scaleFactor;
+		y *= scaleFactor;
+
+		// Scale the object's primary bounding box
+		_boundingRect.left *= scaleFactor;
+		_boundingRect.top *= scaleFactor;
+		_boundingRect.right *= scaleFactor;
+		_boundingRect.bottom *= scaleFactor;
+
+		// Scale the secondary clipping/logic rectangle
+		_rect.left *= scaleFactor;
+		_rect.top *= scaleFactor;
+		_rect.right *= scaleFactor;
+		_rect.bottom *= scaleFactor;
+
+		// Scale positional audio emitters so the sound comes from the correct 3D HD location!
+		_soundCoords.x *= scaleFactor;
+		_soundCoords.y *= scaleFactor;
+	}
+	// ==========================================================
 }
 
 void Object::saveLoadWithSerializer(Common::Serializer &s) {
