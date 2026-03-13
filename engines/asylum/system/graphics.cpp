@@ -139,7 +139,8 @@ void GraphicResource::init(byte *data, int32 size) {
 					// Check for Waifu2x HD Replacement
 					if (doReplace) {
 						Common::String hdName = Common::String::format("SanitariumHDPack/RES%03d/obj_%u_f%d.png", packId, _resourceId, i);
-						Common::FSNode hdNode(Common::Path(hdName));
+						Common::Path hdPath(hdName);
+						Common::FSNode hdNode(hdPath);
 						
 						if (hdNode.exists()) {
 							Common::File f;
