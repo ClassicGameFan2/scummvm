@@ -884,13 +884,30 @@ void Screen::drawZoomedMask(byte *mask, uint16 height, uint16 width, uint16 mask
 void Screen::bltMasked(byte *srcBuffer, byte *maskBuffer, int16 height, int16 width, uint16 srcPitch, uint16 maskPitch, byte nSkippedBits, byte *dstBuffer, uint16 dstPitch) const {
 	if (nSkippedBits > 7) error("[Screen::bltMasked] Invalid number of skipped bits (was: %d, max: 7)", nSkippedBits);
 
+	int scale = ASYLUM_SCALE_FACTOR;
+
 	while (height--) {
 		int run = 7 - nSkippedBits;
 		uint skip = *maskBuffer >> nSkippedBits;
 
+		byte *scaledDstRow1 = dstBuffer;
+		byte *scaledDstRow2 = dstBuffer + dstPitch;
+
 		for (int16 i = 0; i < width; i++) {
-			if (*srcBuffer && !(skip & 1)) *dstBuffer = *srcBuffer;
-			dstBuffer++; srcBuffer++;
+			if (*srcBuffer && !(skip & 1)) {
+				// --- HD REMASTER MASK SCALER ---
+				// For every 1 valid pixel in the 1x mask, draw a NxN block 
+				// to match the scaled HD screen surface!
+				for (int sy = 0; sy < scale; sy++) {
+					byte *curDst = dstBuffer + (sy * dstPitch) + (i * scale);
+					for (int sx = 0; sx < scale; sx++) {
+						curDst[sx] = *srcBuffer;
+					}
+				}
+				// -------------------------------
+			}
+			
+			srcBuffer++;
 
 			if (i == width - 1) break;
 
@@ -903,7 +920,8 @@ void Screen::bltMasked(byte *srcBuffer, byte *maskBuffer, int16 height, int16 wi
 				skip >>= 1;
 			}
 		}
-		dstBuffer  += dstPitch;
+		
+		dstBuffer  += (dstPitch * scale);
 		srcBuffer  += srcPitch;
 		maskBuffer += maskPitch + 1;
 	}
