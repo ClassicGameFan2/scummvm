@@ -46,6 +46,9 @@
 
 namespace Asylum {
 
+// Translate physical HD mouse clicks to 1x Logical Coordinates
+#define LOGICAL_MOUSE(pt) Common::Point((pt).x / ASYLUM_SCALE_FACTOR, (pt).y / ASYLUM_SCALE_FACTOR)
+
 #define SCREEN_EDGES 40
 #define SCROLL_STEP 10
 
@@ -309,7 +312,16 @@ void Scene::load(ResourcePackId packId) {
 // Event handling
 //////////////////////////////////////////////////////////////////////////
 bool Scene::handleEvent(const AsylumEvent &evt) {
-	switch ((int32)evt.type) {
+	// Create a local copy of the event so we can scale the mouse clicks!
+	AsylumEvent logicalEvt = evt;
+	if (logicalEvt.type == Common::EVENT_LBUTTONDOWN || logicalEvt.type == Common::EVENT_RBUTTONDOWN || 
+	    logicalEvt.type == Common::EVENT_MOUSEMOVE || logicalEvt.type == Common::EVENT_LBUTTONUP || 
+	    logicalEvt.type == Common::EVENT_RBUTTONUP) {
+		logicalEvt.mouse.x /= ASYLUM_SCALE_FACTOR;
+		logicalEvt.mouse.y /= ASYLUM_SCALE_FACTOR;
+	}
+
+	switch ((int32)logicalEvt.type) {
 	default:
 		break;
 
@@ -324,32 +336,30 @@ bool Scene::handleEvent(const AsylumEvent &evt) {
 		return update();
 
 	case Common::EVENT_CUSTOM_ENGINE_ACTION_START:
-		return actionDown((AsylumAction)evt.customType);
+		return actionDown((AsylumAction)logicalEvt.customType);
 
 	case Common::EVENT_CUSTOM_ENGINE_ACTION_END:
-		return actionUp((AsylumAction)evt.customType);
+		return actionUp((AsylumAction)logicalEvt.customType);
 
 	case Common::EVENT_KEYDOWN:
-		if (evt.kbd.flags & Common::KBD_CTRL)
+		if (logicalEvt.kbd.flags & Common::KBD_CTRL)
 			_isCTRLPressed = true;
-
-		return key(evt);
+		return key(logicalEvt);
 
 	case Common::EVENT_KEYUP:
-		if (!(evt.kbd.flags & Common::KBD_CTRL))
+		if (!(logicalEvt.kbd.flags & Common::KBD_CTRL))
 			_isCTRLPressed = false;
 		break;
 
 	case Common::EVENT_LBUTTONDOWN:
 	case Common::EVENT_RBUTTONDOWN:
-		return getCursor()->isHidden() ? false : clickDown(evt);
+		return getCursor()->isHidden() ? false : clickDown(logicalEvt);
 
 	case Common::EVENT_RBUTTONUP:
 		_rightButtonDown = false;
 		activate();
 		break;
 	}
-
 	return false;
 }
 
@@ -768,7 +778,7 @@ bool Scene::updateScene() {
 
 void Scene::updateMouse() {
 	Actor *player = getActor();
-	Common::Point mouse = getCursor()->position();
+	Common::Point mouse = LOGICAL_MOUSE(getCursor()->position());
 
 	Common::Point pt;
 	player->adjustCoordinates(&pt);
@@ -1232,20 +1242,21 @@ void Scene::updateCoordinates() {
 	// Update scene coordinates
 	Common::Rect sceneRect = _ws->sceneRects[_ws->sceneRectIdx];
 
-	if (xLeft < sceneRect.left)
-		xLeft =_ws->xLeft =sceneRect.left;
+	// SMART DE-MAGICKING: Top-Left Docking for small rooms!
+	if (sceneRect.width() <= LOGICAL_WIDTH) {
+		xLeft = _ws->xLeft = sceneRect.left;
+	} else {
+		if (xLeft < sceneRect.left) xLeft = _ws->xLeft = sceneRect.left;
+		if ((xLeft + LOGICAL_WIDTH) > sceneRect.right) xLeft = _ws->xLeft = sceneRect.right - LOGICAL_WIDTH;
+	}
 
-	if (yTop < sceneRect.top)
+	if (sceneRect.height() <= LOGICAL_HEIGHT) {
 		yTop = _ws->yTop = sceneRect.top;
+	} else {
+		if (yTop < sceneRect.top) yTop = _ws->yTop = sceneRect.top;
+		if ((yTop + LOGICAL_HEIGHT) > sceneRect.bottom) yTop = _ws->yTop = sceneRect.bottom - LOGICAL_HEIGHT;
+	}
 
-	if ((xLeft + 639) > sceneRect.right)
-		xLeft = _ws->xLeft = sceneRect.right - 639;
-
-	if ((yTop + 479) > sceneRect.bottom)
-		yTop = _ws->yTop = sceneRect.bottom - 479;
-
-	// XXX dword_44E1EC is set to 2 at this point if the scene coordinates
-	// have changed, but that variable is never used anywhere else
 	if ((_ws->motionStatus == 2 || _ws->motionStatus == 5) && (oxLeft != _ws->xLeft || oyTop != _ws->yTop))
 		debugC(kDebugLevelScene, "[Scene::updateCoordinates] (%d, %d) ~> (%d, %d), motionStatus = %d",
 				_ws->xLeft, _ws->yTop, _ws->coordinates[0], _ws->coordinates[1], _ws->motionStatus);
@@ -1255,7 +1266,7 @@ void Scene::updateCursor(ActorDirection direction, const Common::Rect &rect) {
 	HitType type = kHitNone;
 	Actor *player = getActor();
 	int16 rightLimit = rect.right - 10;
-	Common::Point mouse = getCursor()->position();
+	Common::Point mouse = LOGICAL_MOUSE(getCursor()->position());
 
 	if (getSharedData()->getFlag(kFlagIsEncounterRunning)) {
 		if (getCursor()->getResourceId() != _ws->cursorResources[kCursorResourceTalkNPC])
@@ -1399,7 +1410,7 @@ int32 Scene::hitTestScene(HitType &type) {
 	if (!_ws)
 		error("[Scene::hitTestScene] WorldStats not initialized properly!");
 
-	const Common::Point pt = getCursor()->position();
+	const Common::Point pt = LOGICAL_MOUSE(getCursor()->position());
 
 	int16 top  = pt.x + _ws->xLeft;
 	int16 left = pt.y + _ws->yTop;
@@ -1451,7 +1462,7 @@ int32 Scene::hitTestScene(HitType &type) {
 }
 
 int32 Scene::hitTestActionArea() {
-	const Common::Point pt = getCursor()->position();
+	const Common::Point pt = LOGICAL_MOUSE(getCursor()->position());
 
 	int32 targetIdx = findActionArea(kActionAreaType2, Common::Point(_ws->xLeft + pt.x, _ws->yTop + pt.y));
 
@@ -1465,7 +1476,7 @@ ActorIndex Scene::hitTestActor() {
 	if (!_ws)
 		error("[Scene::hitTestActor] WorldStats not initialized properly!");
 
-	const Common::Point mouse = getCursor()->position();
+	const Common::Point mouse = LOGICAL_MOUSE(getCursor()->position());
 
 	if (_ws->actors.size() == 0)
 		return -1;
@@ -1592,7 +1603,7 @@ ActorIndex Scene::hitTestActor() {
 }
 
 bool Scene::hitTestPlayer() {
-	const Common::Point pt = getCursor()->position();
+	const Common::Point pt = LOGICAL_MOUSE(getCursor()->position());
 
 	Actor *player = getActor();
 	Common::Point point;
@@ -1612,7 +1623,7 @@ int32 Scene::hitTestObject() {
 	if (!_ws)
 		error("[Scene::hitTestObject] WorldStats not initialized properly!");
 
-	const Common::Point pt = getCursor()->position();
+	const Common::Point pt = LOGICAL_MOUSE(getCursor()->position());
 
 	for (int32 i = _ws->objects.size() - 1; i >= 0; i--) {
 		Object *object = _ws->objects[i];
@@ -1783,7 +1794,7 @@ void Scene::handleHit(int32 index, HitType type) {
 }
 
 void Scene::clickInventory() {
-	const Common::Point mouse = getCursor()->position();
+	const Common::Point mouse = LOGICAL_MOUSE(getCursor()->position());
 	Common::Point point;
 	Actor *player = getActor();
 
@@ -2197,8 +2208,8 @@ void Scene::adjustCoordinates(Common::Point *point) {
 	if (!_ws)
 		error("[Scene::adjustCoordinates] WorldStats not initialized properly!");
 
-	point->x = _ws->xLeft + getCursor()->position().x;
-	point->y = _ws->yTop  + getCursor()->position().y;
+	point->x = _ws->xLeft + LOGICAL_MOUSE(getCursor()->position()).x;
+	point->y = _ws->yTop  + LOGICAL_MOUSE(getCursor()->position()).y;
 }
 
 Actor *Scene::getActor(ActorIndex index) {
@@ -2864,15 +2875,15 @@ void Scene::debugScreenScrolling() {
 	Common::Rect rect = GraphicResource::getFrameRect(_vm, _ws->backgroundImage, 0);
 
 	// Horizontal scrolling
-	if (getCursor()->position().x < SCREEN_EDGES && _ws->xLeft >= SCROLL_STEP)
+	if (LOGICAL_MOUSE(getCursor()->position()).x < SCREEN_EDGES && _ws->xLeft >= SCROLL_STEP)
 		_ws->xLeft -= SCROLL_STEP;
-	else if (getCursor()->position().x > (ASYLUM_SCREEN_WIDTH - SCREEN_EDGES) && _ws->xLeft <= (rect.width() - (ASYLUM_SCREEN_WIDTH + SCROLL_STEP)))
+	else if (LOGICAL_MOUSE(getCursor()->position()).x > (ASYLUM_SCREEN_WIDTH - SCREEN_EDGES) && _ws->xLeft <= (rect.width() - (ASYLUM_SCREEN_WIDTH + SCROLL_STEP)))
 		_ws->xLeft += SCROLL_STEP;
 
 	// Vertical scrolling
-	if (getCursor()->position().y < SCREEN_EDGES && _ws->yTop >= SCROLL_STEP)
+	if (LOGICAL_MOUSE(getCursor()->position()).y < SCREEN_EDGES && _ws->yTop >= SCROLL_STEP)
 		_ws->yTop -= SCROLL_STEP;
-	else if (getCursor()->position().y > (ASYLUM_SCREEN_HEIGHT - SCREEN_EDGES) && _ws->yTop <= (rect.height() - (ASYLUM_SCREEN_HEIGHT + SCROLL_STEP)))
+	else if (LOGICAL_MOUSE(getCursor()->position()).y > (ASYLUM_SCREEN_HEIGHT - SCREEN_EDGES) && _ws->yTop <= (rect.height() - (ASYLUM_SCREEN_HEIGHT + SCROLL_STEP)))
 		_ws->yTop += SCROLL_STEP;
 }
 
