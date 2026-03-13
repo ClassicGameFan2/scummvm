@@ -24,17 +24,6 @@ int g_debugDrawRects;
 
 #define TRANSPARENCY_TABLE_SIZE (256 * 256)
 
-// --- HD REMASTER HELPER ---
-static int getScaleFactor() {
-	if (ConfMan.hasKey("InternalUpscalingFactor")) {
-		int sf = ConfMan.getInt("InternalUpscalingFactor");
-		return sf > 1 ? sf : 1;
-	}
-	return 1;
-}
-// --------------------------
-
-
 Screen::Screen(AsylumEngine *vm) : _vm(vm) ,
 	_useColorKey(false), _transTableCount(0), _transTable(nullptr), _transTableBuffer(nullptr) {
 	_backBuffer.create(ASYLUM_SCREEN_WIDTH, ASYLUM_SCREEN_HEIGHT, Graphics::PixelFormat::createFormatCLUT8());
@@ -102,9 +91,8 @@ void Screen::draw(GraphicResource *resource, uint32 frameIndex, const Common::Po
 	ResourceEntry *resourceMask = nullptr;
 
 	// --- HD REMASTER RENDERING MULTIPLIER ---
-	int scale = getScaleFactor();
-	Common::Point s_source(source.x * scale, source.y * scale);
-	Common::Point s_dest(destination.x * scale, destination.y * scale);
+	Common::Point s_source(source.x * ASYLUM_SCALE_FACTOR, source.y * ASYLUM_SCALE_FACTOR);
+	Common::Point s_dest(destination.x * ASYLUM_SCALE_FACTOR, destination.y * ASYLUM_SCALE_FACTOR);
 	// ----------------------------------------
 
 	// Compute coordinates using the scaled HD anchors!
@@ -120,7 +108,7 @@ void Screen::draw(GraphicResource *resource, uint32 frameIndex, const Common::Po
 				dest.left = s_source.x + (int16)resource->getData().maxWidth - ((int16)frame->getWidth() + frame->x);
 			}
 		} else {
-			dest.left += (int16)(2 * ((_flag * scale) - (frame->getHeight() * 2 - frame->x)));
+			dest.left += (int16)(2 * ((_flag * ASYLUM_SCALE_FACTOR) - (frame->getHeight() * 2 - frame->x)));
 		}
 	}
 
@@ -141,8 +129,8 @@ void Screen::draw(GraphicResource *resource, uint32 frameIndex, const Common::Po
 		resourceMask = getResource()->get(resourceIdDestination);
 
 		// Adjust masked rectangles to HD Scale
-		int16 maskW = (int16)resourceMask->getData(4) * scale;
-		int16 maskH = (int16)resourceMask->getData(0) * scale;
+		int16 maskW = (int16)resourceMask->getData(4) * ASYLUM_SCALE_FACTOR;
+		int16 maskH = (int16)resourceMask->getData(0) * ASYLUM_SCALE_FACTOR;
 
 		srcMask = Common::Rect(0, 0, maskW, maskH);
 		destMask = Common::Rect(s_dest.x, s_dest.y, s_dest.x + maskW, s_dest.y + maskH);
@@ -165,7 +153,6 @@ void Screen::draw(GraphicResource *resource, uint32 frameIndex, const Common::Po
 		if (!resourceMask)
 			error("[Screen::draw] Trying to draw masked with an invalid resource mask");
 
-		// Note: We intentionally pass the unscaled 1x pitch for the maskData so it reads memory safely
 		blitMasked(frame, &src, resourceMask->data + 8, &srcMask, &destMask, (uint16)resourceMask->getData(4), &dest, flags);
 	} else {
 		blit(frame, &src, &dest, flags);
@@ -186,6 +173,7 @@ void Screen::clear() {
 
 void Screen::drawWideScreenBars(int16 barSize) const {
 	if (barSize > 0) {
+		// Use physical screen width for the bars
 		_vm->_system->fillScreen(Common::Rect(0, 0, ASYLUM_SCREEN_WIDTH, barSize), 0);
 		_vm->_system->fillScreen(Common::Rect(0, ASYLUM_SCREEN_HEIGHT - barSize, ASYLUM_SCREEN_WIDTH, ASYLUM_SCREEN_HEIGHT), 0);
 	}
@@ -558,11 +546,8 @@ void Screen::addGraphicToQueueCrossfade(ResourceId resourceId, uint32 frameIndex
 	byte *transparencyIndex = _transTable;
 	selectTransTable(transTableNum);
 
-	// --- HD REMASTER SCALING FOR CROSSFADES ---
-	int scale = getScaleFactor();
-	Common::Point s_point(point.x * scale, point.y * scale);
-	Common::Point s_dest(destination.x * scale, destination.y * scale);
-	// ------------------------------------------
+	Common::Point s_point(point.x * ASYLUM_SCALE_FACTOR, point.y * ASYLUM_SCALE_FACTOR);
+	Common::Point s_dest(destination.x * ASYLUM_SCALE_FACTOR, destination.y * ASYLUM_SCALE_FACTOR);
 
 	GraphicResource *resource = new GraphicResource(_vm, resourceId);
 	GraphicFrame *frame = resource->getFrame(frameIndex);
@@ -573,7 +558,6 @@ void Screen::addGraphicToQueueCrossfade(ResourceId resourceId, uint32 frameIndex
 	Common::Rect src(0, 0, frame->getWidth(), frame->getHeight());
 	Common::Rect dst = src;
 	
-	// Apply scaled anchors
 	dst.translate(s_point.x + frame->x, s_point.y + frame->y);
 
 	clip(&src, &dst, 0);
@@ -978,7 +962,7 @@ void Screen::drawRect(const Common::Rect &rect, uint32 color) {
 }
 
 void Screen::copyToBackBufferClipped(Graphics::Surface *surface, int16 x, int16 y) {
-	int scale = getScaleFactor();
+	int scale = ASYLUM_SCALE_FACTOR;
 	int sx = x * scale;
 	int sy = y * scale;
 
