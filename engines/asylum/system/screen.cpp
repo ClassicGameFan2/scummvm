@@ -16,11 +16,6 @@
 
 namespace Asylum {
 
-extern int ASYLUM_SCALE_FACTOR;
-extern int LOGICAL_WIDTH;
-extern int LOGICAL_HEIGHT;
-extern int ASYLUM_SCREEN_WIDTH;
-extern int ASYLUM_SCREEN_HEIGHT;
 extern Graphics::Surface *getHDSurface(uint32 resourceId, uint32 frameIndex);
 
 int g_debugDrawRects;
