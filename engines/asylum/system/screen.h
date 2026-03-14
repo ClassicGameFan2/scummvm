@@ -153,6 +153,7 @@ private:
 	AsylumEngine *_vm;
 
 	Graphics::Surface _backBuffer;
+	Graphics::Surface _hdBackBuffer; // <--- ADD THIS LINE FOR TRUE PROJECTOR
 	Common::Rect _clipRect;
 	Common::Array<GraphicQueueItem> _queueItems;
 
