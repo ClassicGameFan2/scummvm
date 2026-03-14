@@ -222,18 +222,6 @@ void Screen::draw(GraphicResource *resource, uint32 frameIndex, const Common::Po
 
 void Screen::draw(const Graphics::Surface &surface, int x, int y) {
 	_backBuffer.copyRectToSurface(surface, x, y, Common::Rect(0, 0, surface.w, surface.h));
-
-	int S = ASYLUM_SCALE_FACTOR;
-	for (int cy = 0; cy < surface.h; cy++) {
-		for (int cx = 0; cx < surface.w; cx++) {
-			byte color = *(const byte *)surface.getBasePtr(cx, cy);
-			for (int sy = 0; sy < S; sy++) {
-				for (int sx = 0; sx < S; sx++) {
-					_hdBackBuffer.setPixel((x+cx)*S + sx, (y+cy)*S + sy, color);
-				}
-			}
-		}
-	}
 }
 
 void Screen::clear() {
@@ -251,11 +239,31 @@ void Screen::drawWideScreenBars(int16 barSize) const {
 
 void Screen::fillRect(int16 x, int16 y, int16 width, int16 height, uint32 color) {
 	_backBuffer.fillRect(Common::Rect(x, y, x + width, y + height), color);
-	int S = ASYLUM_SCALE_FACTOR;
-	_hdBackBuffer.fillRect(Common::Rect(x * S, y * S, (x + width) * S, (y + height) * S), color);
 }
 
 void Screen::copyBackBufferToScreen() {
+	int S = ASYLUM_SCALE_FACTOR;
+
+	// DIAGNOSTIC: Do a brute-force nearest-neighbor copy of the Game Brain directly to the Monitor!
+	// This completely bypasses all the complex HD drawing logic to test if the game is actually running.
+	if (S > 1) {
+		for (int y = 0; y < LOGICAL_HEIGHT; y++) {
+			byte *srcRow = (byte *)_backBuffer.getBasePtr(0, y);
+			byte *dstRow = (byte *)_hdBackBuffer.getBasePtr(0, y * S);
+			for (int x = 0; x < LOGICAL_WIDTH; x++) {
+				byte c = srcRow[x];
+				for (int sy = 0; sy < S; sy++) {
+					for (int sx = 0; sx < S; sx++) {
+						_hdBackBuffer.setPixel((x * S) + sx, (y * S) + sy, c);
+					}
+				}
+			}
+		}
+	} else {
+		// At 1x, just copy it directly!
+		_hdBackBuffer.copyFrom(_backBuffer);
+	}
+
 	_vm->_system->copyRectToScreen((byte *)_hdBackBuffer.getPixels(), _hdBackBuffer.w, 0, 0, _hdBackBuffer.w, _hdBackBuffer.h);
 }
 
