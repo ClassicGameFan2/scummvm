@@ -1,5 +1,22 @@
 /* ScummVM - Graphic Adventure Engine
- * (Copyright headers...)
+ *
+ * ScummVM is the legal property of its developers, whose names
+ * are too numerous to list here. Please refer to the COPYRIGHT
+ * file distributed with this source distribution.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ *
  */
 
 #include "asylum/system/graphics.h"
@@ -15,24 +32,21 @@
 #include "common/fs.h"
 #include "common/config-manager.h"
 #include "common/hashmap.h"
-#include "common/array.h"
 // ----------------------------
 
 namespace Asylum {
 
-// --- GLOBAL HD MEMORY CACHE ---
-struct CachedHDFrame {
-	Graphics::Surface *surf;
-	int16 x;
-	int16 y;
-};
-struct CachedHDResource {
-	uint16 maxWidth;
-	Common::Array<CachedHDFrame> frames;
-};
+// --- GLOBAL HD DICTIONARY (THE VAULT) ---
+// This vault is completely hidden from the 1x Game Brain!
+static Common::HashMap<uint32, Graphics::Surface *> g_hdSurfaces;
+static uint32 g_lastPackId = 0xFFFFFFFF;
 
-static Common::HashMap<uint32, CachedHDResource> *g_hdCache = nullptr;
-// ------------------------------
+Graphics::Surface *getHDSurface(uint32 resourceId, uint32 frameIndex) {
+	uint32 key = (resourceId << 8) | (frameIndex & 0xFF);
+	if (g_hdSurfaces.contains(key)) return g_hdSurfaces[key];
+	return nullptr;
+}
+// ----------------------------------------
 
 GraphicResource::GraphicResource(AsylumEngine *engine) : _vm(engine), _resourceId(kResourceNone) {
 }
@@ -63,6 +77,8 @@ bool GraphicResource::load(ResourceId id) {
 }
 
 void GraphicResource::clear() {
+	// This only frees the 1x image from the engine's active memory. 
+	// The HD image remains safe in the Vault!
 	for (uint32 i = 0; i < _frames.size(); i++) {
 		_frames[i].surface.free();
 	}
@@ -106,28 +122,6 @@ void GraphicResource::init(byte *data, int32 size) {
 		prevOffset = nextOffset;
 	}
 
-	if (!g_hdCache) g_hdCache = new Common::HashMap<uint32, CachedHDResource>();
-
-	// =====================================================================
-	// CACHE LOOKUP: Deep Copy from the Vault
-	// =====================================================================
-	if (g_hdCache->contains(_resourceId)) {
-		CachedHDResource &hd = (*g_hdCache)[_resourceId];
-		_data.maxWidth = hd.maxWidth;
-		
-		for (uint32 i = 0; i < frameCount; i++) {
-			_frames[i].x = hd.frames[i].x;
-			_frames[i].y = hd.frames[i].y;
-			
-			if (hd.frames[i].surf->getPixels()) {
-				_frames[i].surface.create(hd.frames[i].surf->w, hd.frames[i].surf->h, hd.frames[i].surf->format);
-				_frames[i].surface.copyFrom(*hd.frames[i].surf);
-			}
-		}
-		return; 
-	}
-	// =====================================================================
-
 	// --- HD CONFIGURATION ---
 	int scaleFactor = 1;
 	if (ConfMan.hasKey("InternalUpscalingFactor")) {
@@ -137,7 +131,19 @@ void GraphicResource::init(byte *data, int32 size) {
 	bool doReplace = ConfMan.hasKey("Asset_HD_Replace") ? ConfMan.getInt("Asset_HD_Replace") != 0 : false;
 	uint32 packId = (_resourceId >> 16) & 0xFF;
 
-	CachedHDResource newCacheEntry;
+	// SMART RAM CLEANER: If we load a new chapter, empty the HD Vault so RAM doesn't overflow!
+	if (packId != g_lastPackId && g_lastPackId != 0xFFFFFFFF) {
+		for (auto &it : g_hdSurfaces) {
+			if (it._value) {
+				it._value->free();
+				delete it._value;
+			}
+		}
+		g_hdSurfaces.clear();
+	}
+	g_lastPackId = packId;
+	// ------------------------
+
 	dataPtr = data;
 
 	for (uint32 i = 0; i < frameCount; i++) {
@@ -149,90 +155,68 @@ void GraphicResource::init(byte *data, int32 size) {
 		uint16 height = READ_LE_UINT16(dataPtr); dataPtr += 2;
 		uint16 width  = READ_LE_UINT16(dataPtr); dataPtr += 2;
 
-		CachedHDFrame cacheFrame;
-		cacheFrame.surf = new Graphics::Surface();
-		cacheFrame.x = _frames[i].x;
-		cacheFrame.y = _frames[i].y;
-
 		if (width > 0 && height > 0) {
-			Graphics::Surface origSurf;
-			origSurf.create(width, height, Graphics::PixelFormat::createFormatCLUT8());
-			origSurf.copyRectToSurface(dataPtr, width, 0, 0, width, height);
+			// 1. CREATE THE 1X GRAPHIC (The Game Brain uses this!)
+			// This perfectly preserves hitboxes, inventory clicks, and physics boundaries!
+			_frames[i].surface.create(width, height, Graphics::PixelFormat::createFormatCLUT8());
+			_frames[i].surface.copyRectToSurface(dataPtr, width, 0, 0, width, height);
 
-			bool replaced = false;
-			int appliedScale = 1;
+			// 2. SECRETY BUILD THE HD GRAPHIC IN THE VAULT
+			if (scaleFactor > 1) {
+				uint32 key = (_resourceId << 8) | (i & 0xFF);
+				
+				if (!g_hdSurfaces.contains(key)) {
+					bool replaced = false;
 
-			// CHECK FOR HD REPLACEMENT
-			if (doReplace) {
-				Common::String hdName = Common::String::format("SanitariumHDPack/RES%03d/obj_%u_f%d.png", packId, _resourceId, i);
-				Common::Path hdPath(hdName);
-				
-				// Use FSNode to bypass virtual sandbox and read relative to EXE!
-				Common::FSNode hdNode(hdPath);
-				
-				if (hdNode.exists()) {
-					Common::File f;
-					if (f.open(hdNode)) {
-						Image::PNGDecoder decoder;
-						if (decoder.loadStream(f)) {
-							const Graphics::Surface *decSurf = decoder.getSurface();
-							if (decSurf->format.bytesPerPixel == 1) {
-								cacheFrame.surf->create(decSurf->w, decSurf->h, Graphics::PixelFormat::createFormatCLUT8());
-								cacheFrame.surf->copyFrom(*decSurf);
-								replaced = true;
-								appliedScale = decSurf->w / width;
-								if (appliedScale < 1) appliedScale = 1;
-							} else {
-								warning("[HD INJECTOR] Failed: %s is not 8-bit Indexed!", hdName.c_str());
+					// Check for Waifu2x HD Replacement
+					if (doReplace) {
+						Common::String hdName = Common::String::format("SanitariumHDPack/RES%03d/obj_%u_f%d.png", packId, _resourceId, i);
+						Common::Path hdPath(hdName);
+						Common::FSNode hdNode(hdPath);
+						
+						if (hdNode.exists()) {
+							Common::File f;
+							if (f.open(hdNode)) {
+								Image::PNGDecoder decoder;
+								if (decoder.loadStream(f)) {
+									const Graphics::Surface *decSurf = decoder.getSurface();
+									// Ensure it is 8-bit to match engine capabilities
+									if (decSurf->format.bytesPerPixel == 1) { 
+										Graphics::Surface *hdSurf = new Graphics::Surface();
+										hdSurf->create(decSurf->w, decSurf->h, Graphics::PixelFormat::createFormatCLUT8());
+										hdSurf->copyFrom(*decSurf);
+										g_hdSurfaces[key] = hdSurf;
+										replaced = true;
+									} else {
+										warning("[HD INJECTOR] Failed: %s is not an 8-bit Indexed PNG!", hdName.c_str());
+									}
+								}
 							}
 						}
 					}
-				}
-			}
 
-			// INTERNAL NEAREST-NEIGHBOR FALLBACK
-			if (!replaced && scaleFactor > 1) {
-				int scaledW = width * scaleFactor;
-				int scaledH = height * scaleFactor;
-				cacheFrame.surf->create(scaledW, scaledH, Graphics::PixelFormat::createFormatCLUT8());
+					// Nearest-Neighbor Fallback
+					if (!replaced) {
+						Graphics::Surface *hdSurf = new Graphics::Surface();
+						hdSurf->create(width * scaleFactor, height * scaleFactor, Graphics::PixelFormat::createFormatCLUT8());
 
-				const byte *srcPx = (const byte *)origSurf.getPixels();
-				byte *dstPx = (byte *)cacheFrame.surf->getPixels();
+						const byte *srcPx = (const byte *)_frames[i].surface.getPixels();
+						byte *dstPx = (byte *)hdSurf->getPixels();
 
-				for (int sy = 0; sy < scaledH; sy++) {
-					const byte *srcRow = srcPx + ((sy / scaleFactor) * origSurf.pitch);
-					byte *dstRow = dstPx + (sy * cacheFrame.surf->pitch);
-					for (int sx = 0; sx < scaledW; sx++) {
-						dstRow[sx] = srcRow[sx / scaleFactor];
+						// Mathematically flawless point-scaling
+						for (int sy = 0; sy < height * scaleFactor; sy++) {
+							const byte *srcRow = srcPx + ((sy / scaleFactor) * _frames[i].surface.pitch);
+							byte *dstRow = dstPx + (sy * hdSurf->pitch);
+							for (int sx = 0; sx < width * scaleFactor; sx++) {
+								dstRow[sx] = srcRow[sx / scaleFactor];
+							}
+						}
+						g_hdSurfaces[key] = hdSurf;
 					}
 				}
-				replaced = true;
-				appliedScale = scaleFactor;
 			}
-
-			// FINALIZE
-			if (!replaced) {
-				cacheFrame.surf->create(width, height, origSurf.format);
-				cacheFrame.surf->copyFrom(origSurf);
-			} else {
-				cacheFrame.x *= appliedScale;
-				cacheFrame.y *= appliedScale;
-			}
-
-			_frames[i].x = cacheFrame.x;
-			_frames[i].y = cacheFrame.y;
-			_frames[i].surface.create(cacheFrame.surf->w, cacheFrame.surf->h, cacheFrame.surf->format);
-			_frames[i].surface.copyFrom(*cacheFrame.surf);
-
-			origSurf.free();
 		}
-		newCacheEntry.frames.push_back(cacheFrame);
 	}
-
-	newCacheEntry.maxWidth = _data.maxWidth * scaleFactor;
-	_data.maxWidth = newCacheEntry.maxWidth;
-
-	(*g_hdCache)[_resourceId] = newCacheEntry;
 }
 
 uint32 GraphicResource::getFrameCount(AsylumEngine *engine, ResourceId id) {
