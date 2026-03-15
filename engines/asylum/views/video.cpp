@@ -102,18 +102,22 @@ bool VideoPlayer::handleEvent(const AsylumEvent &evt) {
 			if (_subtitleIndex >= 0) {
 				char *text = getText()->get(_subtitles[_subtitleIndex].resourceId);
 
-				int16 y = (int16)(10 * (44 - getText()->draw(0, 99, kTextCalculate, Common::Point(10, 400), 20, 620, text)));
-				if (y <= 400)
-					y = 405;
+				// --- HD REMASTER SUBTITLE FIX ---
+				// Center the subtitles dynamically based on the Logical Viewport!
+				int logicalXOffset = (LOGICAL_WIDTH - 640) / 2;
+				
+				int16 y = (int16)(10 * (44 - getText()->draw(0, 99, kTextCalculate, Common::Point(10 + logicalXOffset, 400), 20, 620, text)));
+				if (y <= 400) y = 405;
 
-				getText()->draw(0, 99, kTextCenter, Common::Point(10, y), 20, 620, text);
+				getText()->draw(0, 99, kTextCenter, Common::Point(10 + logicalXOffset, y), 20, 620, text);
 
 				if (_vm->checkGameVersion("Steam")) {
 					Graphics::Surface *st = getScreen()->getSurface()->convertTo(g_system->getScreenFormat(), _subtitlePalette);
-					g_system->copyRectToScreen((const byte *)st->getBasePtr(0, 400), st->pitch, 0, 400, 640, 80);
+					g_system->copyRectToScreen((const byte *)st->getBasePtr(logicalXOffset, 400), st->pitch, logicalXOffset * ASYLUM_SCALE_FACTOR, 400 * ASYLUM_SCALE_FACTOR, 640 * ASYLUM_SCALE_FACTOR, 80 * ASYLUM_SCALE_FACTOR);
 					st->free();
 					delete st;
 				}
+				// ---------------------------------
 			}
 
 			--_subtitleCounter;
