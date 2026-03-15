@@ -166,8 +166,23 @@ void Screen::fillRect(int16 x, int16 y, int16 width, int16 height, uint32 color)
 
 void Screen::copyBackBufferToScreen() {
 	int S = ASYLUM_SCALE_FACTOR;
-	// SMART OUTPUT: Send the correct buffer based on the user's setting!
 	if (S > 1) {
+		// Sync the 1x buffer to the HD buffer! 
+		// This ensures text, UI, and loading screens (which draw directly to 1x) are upscaled and visible!
+		byte *hdPixels = (byte *)_hdBackBuffer.getPixels();
+		byte *bgPixels = (byte *)_backBuffer.getPixels();
+		for (int y = 0; y < LOGICAL_HEIGHT; y++) {
+			for (int x = 0; x < LOGICAL_WIDTH; x++) {
+				byte color = bgPixels[y * _backBuffer.pitch + x];
+				if (color) {
+					for (int sy = 0; sy < S; sy++) {
+						for (int sx = 0; sx < S; sx++) {
+							hdPixels[(y * S + sy) * _hdBackBuffer.pitch + (x * S + sx)] = color;
+						}
+					}
+				}
+			}
+		}
 		_vm->_system->copyRectToScreen((byte *)_hdBackBuffer.getPixels(), _hdBackBuffer.w, 0, 0, _hdBackBuffer.w, _hdBackBuffer.h);
 	} else {
 		_vm->_system->copyRectToScreen((byte *)_backBuffer.getPixels(), _backBuffer.w, 0, 0, _backBuffer.w, _backBuffer.h);
@@ -206,59 +221,77 @@ void Screen::blit(GraphicFrame *frame, Common::Rect *source, Common::Rect *desti
 	if (!_transTable) error("[Screen::blit] Transparency table buffer not initialized");
 
 	int S = ASYLUM_SCALE_FACTOR;
-	
-	// If the surface is HD (width > original 1x rect), we write to _hdBackBuffer!
 	bool isHD = (frame->surface.w > source->width() && S > 1);
 
-	// Calculate target geometry
-	Common::Rect s_src(source->left * (isHD ? S : 1), source->top * (isHD ? S : 1), source->right * (isHD ? S : 1), source->bottom * (isHD ? S : 1));
-	Common::Rect s_dst(destination->left * (isHD ? S : 1), destination->top * (isHD ? S : 1), destination->right * (isHD ? S : 1), destination->bottom * (isHD ? S : 1));
+	// 1. ALWAYS execute the pure 1x Game Brain Logic
+	uint16 bPitch1x = _backBuffer.pitch;
+	uint16 fPitch1x = isHD ? frame->surface.pitch / S : frame->surface.pitch; 
+	
+	byte *dstBase1x = (byte *)_backBuffer.getPixels() + (destination->top * bPitch1x) + destination->left;
+	byte *srcBase1x = (byte *)frame->surface.getPixels() + (source->top * (isHD ? S : 1) * frame->surface.pitch) + (source->left * (isHD ? S : 1));
+	byte *srcMirror1x = (byte *)frame->surface.getPixels() + (source->top * (isHD ? S : 1) * frame->surface.pitch) + (source->right * (isHD ? S : 1)) - 1;
 
-	uint16 fPitch = frame->surface.pitch;
-	uint16 bPitch = isHD ? _hdBackBuffer.pitch : _backBuffer.pitch;
+	// Use pure 1x pointers to feed the Game Brain. No crashes!
+	if (!isHD) {
+		if ((uint32)flags & 0x80000000) {
+			int32 flagSet = flags & 0x7FFFFFFF;
+			bool hasTransTableIndex = false;
+			if (flags & 0x10000000) { flagSet = flags & 0x6FFFFFFF; hasTransTableIndex = (_transTable ? true : false); }
+			bool isMirrored = (flagSet == kDrawFlagMirrorLeftRight);
 
-	byte *dstBase = (isHD ? (byte *)_hdBackBuffer.getPixels() : (byte *)_backBuffer.getPixels()) + (s_dst.top * bPitch) + s_dst.left;
-	byte *srcBase = (byte *)frame->surface.getPixels() + (s_src.top * fPitch) + s_src.left;
-	byte *srcMirror = (byte *)frame->surface.getPixels() + (s_src.top * fPitch) + s_src.right - 1;
-
-	// Also write the 1x version to the Game Brain to fix Dirty Rect Ghosting!
-	if (isHD) {
-		byte *dstBrain = (byte *)_backBuffer.getPixels() + (destination->top * _backBuffer.pitch) + destination->left;
-		byte *srcBrain = (byte *)frame->surface.getPixels() + (s_src.top * fPitch) + s_src.left;
-		blitRawColorKey(dstBrain, srcBrain, destination->height(), destination->width(), (fPitch * S) - destination->width(), _backBuffer.pitch - destination->width());
-	}
-
-	if ((uint32)flags & 0x80000000) {
-		int32 flagSet = flags & 0x7FFFFFFF;
-		bool hasTransTableIndex = false;
-		if (flags & 0x10000000) { flagSet = flags & 0x6FFFFFFF; hasTransTableIndex = (_transTable ? true : false); }
-		bool isMirrored = (flagSet == kDrawFlagMirrorLeftRight);
-
-		if (hasTransTableIndex) {
-			if (isMirrored) blitTranstableMirrored(dstBase, srcMirror, s_dst.height(), s_dst.width(), fPitch + s_dst.width(), bPitch - s_dst.width());
-			else blitTranstable(dstBase, srcBase, s_dst.height(), s_dst.width(), fPitch - s_dst.width(), bPitch - s_dst.width());
-		} else if (flagSet) {
-			if (isMirrored) {
-				if (_useColorKey) blitMirroredColorKey(dstBase, srcMirror, s_dst.height(), s_dst.width(), fPitch + s_dst.width(), bPitch - s_dst.width());
-				else blitMirrored(dstBase, srcMirror, s_dst.height(), s_dst.width(), fPitch + s_dst.width(), bPitch - s_dst.width());
+			if (hasTransTableIndex) {
+				if (isMirrored) blitTranstableMirrored(dstBase1x, srcMirror1x, destination->height(), destination->width(), fPitch1x + destination->width(), bPitch1x - destination->width());
+				else blitTranstable(dstBase1x, srcBase1x, destination->height(), destination->width(), fPitch1x - destination->width(), bPitch1x - destination->width());
+			} else if (flagSet) {
+				if (isMirrored) {
+					if (_useColorKey) blitMirroredColorKey(dstBase1x, srcMirror1x, destination->height(), destination->width(), fPitch1x + destination->width(), bPitch1x - destination->width());
+					else blitMirrored(dstBase1x, srcMirror1x, destination->height(), destination->width(), fPitch1x + destination->width(), bPitch1x - destination->width());
+				}
+			} else {
+				if (_useColorKey) blitRawColorKey(dstBase1x, srcBase1x, destination->height(), destination->width(), fPitch1x - destination->width(), bPitch1x - destination->width());
+				else blitRaw(dstBase1x, srcBase1x, destination->height(), destination->width(), fPitch1x - destination->width(), bPitch1x - destination->width());
 			}
-		} else {
-			if (_useColorKey) blitRawColorKey(dstBase, srcBase, s_dst.height(), s_dst.width(), fPitch - s_dst.width(), bPitch - s_dst.width());
-			else blitRaw(dstBase, srcBase, s_dst.height(), s_dst.width(), fPitch - s_dst.width(), bPitch - s_dst.width());
-		}
-	} else if (flags) {
-		if (isHD) {
-			if (_useColorKey) copyToBackBufferWithTransparency((byte *)frame->surface.getBasePtr(s_src.left, s_src.top), fPitch, s_dst.left, s_dst.top, s_src.width(), s_src.height(), (bool)(flags & kDrawFlagMirrorLeftRight), true);
-			else copyToBackBuffer((byte *)frame->surface.getBasePtr(s_src.left, s_src.top), fPitch, s_dst.left, s_dst.top, s_src.width(), s_src.height(), (bool)(flags & kDrawFlagMirrorLeftRight), true);
-		} else {
+		} else if (flags) {
 			blt(destination, frame, source, flags);
-		}
-	} else {
-		if (isHD) {
-			if (_useColorKey) _hdBackBuffer.copyRectToSurfaceWithKey(frame->surface, s_dst.left, s_dst.top, s_src, 0x00);
-			else _hdBackBuffer.copyRectToSurface(frame->surface, s_dst.left, s_dst.top, s_src);
 		} else {
 			bltFast(destination->left, destination->top, frame, source);
+		}
+	}
+
+	// 2. ONLY execute the 2x HD Projector Logic if the asset exists
+	if (isHD) {
+		Common::Rect s_src(source->left * S, source->top * S, source->right * S, source->bottom * S);
+		Common::Rect s_dst(destination->left * S, destination->top * S, destination->right * S, destination->bottom * S);
+
+		uint16 fPitchHD = frame->surface.pitch;
+		uint16 bPitchHD = _hdBackBuffer.pitch;
+
+		byte *dstBaseHD = (byte *)_hdBackBuffer.getPixels() + (s_dst.top * bPitchHD) + s_dst.left;
+		byte *srcBaseHD = (byte *)frame->surface.getPixels() + (s_src.top * fPitchHD) + s_src.left;
+		byte *srcMirrorHD = (byte *)frame->surface.getPixels() + (s_src.top * fPitchHD) + s_src.right - 1;
+
+		if ((uint32)flags & 0x80000000) {
+			int32 flagSet = flags & 0x7FFFFFFF;
+			bool hasTransTableIndex = false;
+			if (flags & 0x10000000) { flagSet = flags & 0x6FFFFFFF; hasTransTableIndex = (_transTable ? true : false); }
+			bool isMirrored = (flagSet == kDrawFlagMirrorLeftRight);
+
+			if (hasTransTableIndex) {
+				if (isMirrored) blitTranstableMirrored(dstBaseHD, srcMirrorHD, s_dst.height(), s_dst.width(), fPitchHD + s_dst.width(), bPitchHD - s_dst.width());
+				else blitTranstable(dstBaseHD, srcBaseHD, s_dst.height(), s_dst.width(), fPitchHD - s_dst.width(), bPitchHD - s_dst.width());
+			} else if (flagSet) {
+				if (isMirrored) {
+					if (_useColorKey) blitMirroredColorKey(dstBaseHD, srcMirrorHD, s_dst.height(), s_dst.width(), fPitchHD + s_dst.width(), bPitchHD - s_dst.width());
+					else blitMirrored(dstBaseHD, srcMirrorHD, s_dst.height(), s_dst.width(), fPitchHD + s_dst.width(), bPitchHD - s_dst.width());
+				}
+			} else {
+				if (_useColorKey) blitRawColorKey(dstBaseHD, srcBaseHD, s_dst.height(), s_dst.width(), fPitchHD - s_dst.width(), bPitchHD - s_dst.width());
+				else blitRaw(dstBaseHD, srcBaseHD, s_dst.height(), s_dst.width(), fPitchHD - s_dst.width(), bPitchHD - s_dst.width());
+			}
+		} else if (flags) {
+			blt(&s_dst, frame, &s_src, flags);
+		} else {
+			bltFast(s_dst.left, s_dst.top, frame, &s_src);
 		}
 	}
 }
