@@ -25,10 +25,7 @@ int g_debugDrawRects;
 Screen::Screen(AsylumEngine *vm) : _vm(vm) ,
 	_useColorKey(false), _transTableCount(0), _transTable(nullptr), _transTableBuffer(nullptr) {
 	
-	// The 1x Logical Buffer (Game Brain & Physics)
 	_backBuffer.create(LOGICAL_WIDTH, LOGICAL_HEIGHT, Graphics::PixelFormat::createFormatCLUT8());
-
-	// The HD Projector Buffer (What the Player sees)
 	_hdBackBuffer.create(ASYLUM_SCREEN_WIDTH, ASYLUM_SCREEN_HEIGHT, Graphics::PixelFormat::createFormatCLUT8());
 
 	_flag = -1;
@@ -50,41 +47,13 @@ Screen::~Screen() {
 	clearTransTables();
 }
 
-void Screen::draw(ResourceId resourceId) {
-	draw(resourceId, 0, Common::Point(0, 0), kDrawFlagNone, kResourceNone, Common::Point(0, 0), false);
-}
-
-void Screen::draw(ResourceId resourceId, uint32 frameIndex, const Common::Point &source, DrawFlags flags, bool colorKey) {
-	draw(resourceId, frameIndex, source, flags, kResourceNone, Common::Point(0, 0), colorKey);
-}
-
-void Screen::draw(ResourceId resourceId, uint32 frameIndex, const int16 (*srcPtr)[2], DrawFlags flags, bool colorKey) {
-	draw(resourceId, frameIndex, Common::Point((*srcPtr)[0], (*srcPtr)[1]), flags, kResourceNone, Common::Point(0, 0), colorKey);
-}
-
-void Screen::drawTransparent(ResourceId resourceId, uint32 frameIndex, const Common::Point &source, DrawFlags flags, uint32 transTableNum) {
-	byte *index = _transTable;
-	selectTransTable(transTableNum);
-	draw(resourceId, frameIndex, source, (DrawFlags)(flags | 0x90000000));
-	_transTable = index;
-}
-
-void Screen::draw(ResourceId resourceId, uint32 frameIndex, const Common::Point &source, DrawFlags flags, ResourceId resourceIdDestination, const Common::Point &destination, bool colorKey) {
-	GraphicResource *resource = new GraphicResource(_vm, resourceId);
-	draw(resource, frameIndex, source, flags, resourceIdDestination, destination, colorKey);
-	delete resource;
-}
-
-void Screen::draw(GraphicResource *resource, uint32 frameIndex, const Common::Point &source, DrawFlags flags, bool colorKey) {
-	draw(resource, frameIndex, source, flags, kResourceNone, Common::Point(0, 0), colorKey);
-}
-
-void Screen::drawTransparent(GraphicResource *resource, uint32 frameIndex, const Common::Point &source, DrawFlags flags, uint32 transTableNum) {
-	byte *index = _transTable;
-	selectTransTable(transTableNum);
-	draw(resource, frameIndex, source, (DrawFlags)(flags | 0x90000000));
-	_transTable = index;
-}
+void Screen::draw(ResourceId resourceId) { draw(resourceId, 0, Common::Point(0, 0), kDrawFlagNone, kResourceNone, Common::Point(0, 0), false); }
+void Screen::draw(ResourceId resourceId, uint32 frameIndex, const Common::Point &source, DrawFlags flags, bool colorKey) { draw(resourceId, frameIndex, source, flags, kResourceNone, Common::Point(0, 0), colorKey); }
+void Screen::draw(ResourceId resourceId, uint32 frameIndex, const int16 (*srcPtr)[2], DrawFlags flags, bool colorKey) { draw(resourceId, frameIndex, Common::Point((*srcPtr)[0], (*srcPtr)[1]), flags, kResourceNone, Common::Point(0, 0), colorKey); }
+void Screen::drawTransparent(ResourceId resourceId, uint32 frameIndex, const Common::Point &source, DrawFlags flags, uint32 transTableNum) { byte *index = _transTable; selectTransTable(transTableNum); draw(resourceId, frameIndex, source, (DrawFlags)(flags | 0x90000000)); _transTable = index; }
+void Screen::draw(ResourceId resourceId, uint32 frameIndex, const Common::Point &source, DrawFlags flags, ResourceId resourceIdDestination, const Common::Point &destination, bool colorKey) { GraphicResource *resource = new GraphicResource(_vm, resourceId); draw(resource, frameIndex, source, flags, resourceIdDestination, destination, colorKey); delete resource; }
+void Screen::draw(GraphicResource *resource, uint32 frameIndex, const Common::Point &source, DrawFlags flags, bool colorKey) { draw(resource, frameIndex, source, flags, kResourceNone, Common::Point(0, 0), colorKey); }
+void Screen::drawTransparent(GraphicResource *resource, uint32 frameIndex, const Common::Point &source, DrawFlags flags, uint32 transTableNum) { byte *index = _transTable; selectTransTable(transTableNum); draw(resource, frameIndex, source, (DrawFlags)(flags | 0x90000000)); _transTable = index; }
 
 void Screen::draw(GraphicResource *resource, uint32 frameIndex, const Common::Point &source, DrawFlags flags, ResourceId resourceIdDestination, const Common::Point &destination, bool colorKey) {
 	GraphicFrame *frame = resource->getFrame(frameIndex);
@@ -115,7 +84,7 @@ void Screen::draw(GraphicResource *resource, uint32 frameIndex, const Common::Po
 	src.right = frame->getWidth();
 	src.bottom = frame->getHeight();
 
-	// 1. Calculate 1x Clipping boundaries
+	// 1x Clipping
 	clip(&src, &dest, flags);
 
 	bool masked = false;
@@ -131,93 +100,22 @@ void Screen::draw(GraphicResource *resource, uint32 frameIndex, const Common::Po
 	}
 
 	if (!src.isValidRect()) return;
-
 	_useColorKey = colorKey;
 
-	// 2. Perform the 1x Draw to the internal Game Brain Buffer
+	// --- THE TRUE PROJECTOR SWAP ---
+	Graphics::Surface origSurf = frame->surface;
+	Graphics::Surface *hdSurf = getHDSurface(resource->getResourceId(), frameIndex);
+	
+	if (hdSurf) frame->surface = *hdSurf; // Swap to HD!
+	
 	if (masked) {
 		blitMasked(frame, &src, resourceMask->data + 8, &srcMask, &destMask, (uint16)resourceMask->getData(4), &dest, flags);
 	} else {
 		blit(frame, &src, &dest, flags);
 	}
-
-	// 3. Perform the HD Draw to the Projector Buffer!
-	int S = ASYLUM_SCALE_FACTOR;
-	if (S > 1) {
-		Graphics::Surface *hdSurf = getHDSurface(resource->getResourceId(), frameIndex);
-		if (hdSurf) {
-			// Temporarily swap the engine's backbuffer to the HD one so we can reuse the native drawing code!
-			Graphics::Surface tmp = _backBuffer;
-			_backBuffer = _hdBackBuffer;
-			
-			GraphicFrame hdFrame;
-			hdFrame.surface = *hdSurf;
-			hdFrame.x = frame->x * S;
-			hdFrame.y = frame->y * S;
-
-			Common::Rect s_src(src.left * S, src.top * S, src.right * S, src.bottom * S);
-			Common::Rect s_dest(dest.left * S, dest.top * S, dest.right * S, dest.bottom * S);
-
-			if (masked) {
-				// We handle the HD Mask loop completely manually to guarantee zero memory over-reads.
-				// This fixes the horizontal rays!
-				byte *frameBuffer = (byte *)hdFrame.surface.getPixels();
-				byte *mirroredBuffer = nullptr;
-				int hdFrameRight = hdFrame.surface.pitch;
-				
-				if (flags & kDrawFlagMirrorLeftRight) {
-					mirroredBuffer = (byte *)malloc(s_src.right * s_src.bottom);
-					blitMirrored(mirroredBuffer, frameBuffer + s_src.right - 1, s_src.bottom, s_src.right, s_src.right + hdFrameRight, 0);
-					frameBuffer = mirroredBuffer;
-					hdFrameRight = s_src.right;
-					s_src.right -= s_src.left;
-					s_src.left = 0;
-				}
-
-				byte *frameBufferPtr = frameBuffer + (s_src.top * hdFrameRight) + s_src.left;
-				byte *maskBufferPtr = resourceMask->data + 8 + (srcMask.top * ((uint16)resourceMask->getData(4) / 8)) + (srcMask.left / 8);
-
-				int skipX = dest.left > destMask.left ? dest.left - destMask.left : 0;
-				int skipY = dest.top > destMask.top ? dest.top - destMask.top : 0;
-				
-				byte nSkippedBits = (srcMask.left + skipX) % 8;
-				byte *maskBase = maskBufferPtr + (skipY * ((uint16)resourceMask->getData(4) / 8)) + (skipX / 8);
-				byte *hdDest = (byte *)_backBuffer.getPixels() + (s_dest.top * _backBuffer.pitch) + s_dest.left;
-
-				// Iterate over the 1x Draw Bounds
-				for (int16 y = 0; y < src.height(); y++) {
-					byte *maskRow = maskBase + (y * ((uint16)resourceMask->getData(4) / 8));
-					int run = 7 - nSkippedBits;
-					uint skip = *maskRow >> nSkippedBits;
-
-					byte *hdSrcRow = frameBufferPtr + (y * S * hdFrameRight);
-					byte *hdDstRow = hdDest + (y * S * _backBuffer.pitch);
-
-					for (int16 x = 0; x < src.width(); x++) {
-						if (!(skip & 1)) {
-							// Map 1x pixel to 2x2 HD block
-							for (int sy = 0; sy < S; sy++) {
-								for (int sx = 0; sx < S; sx++) {
-									byte c = hdSrcRow[(sy * hdFrameRight) + (x * S) + sx];
-									if (c) hdDstRow[(sy * _backBuffer.pitch) + (x * S) + sx] = c;
-								}
-							}
-						}
-						if (x == src.width() - 1) break;
-						run--;
-						if (run < 0) { maskRow++; run = 7; skip = *maskRow; }
-						else skip >>= 1;
-					}
-				}
-				if (mirroredBuffer) free(mirroredBuffer);
-			} else {
-				blit(&hdFrame, &s_src, &s_dest, flags);
-			}
-
-			// Restore internal state
-			_backBuffer = tmp;
-		}
-	}
+	
+	if (hdSurf) frame->surface = origSurf; // Restore 1x Engine State
+	// -------------------------------
 }
 
 void Screen::draw(const Graphics::Surface &surface, int x, int y) {
@@ -231,15 +129,12 @@ void Screen::draw(const Graphics::Surface &surface, int x, int y) {
 		for (int cy = 0; cy < surface.h; cy++) {
 			const byte *srcRow = (const byte *)surface.getBasePtr(0, cy);
 			byte *dstRow1 = hdPixels + (((y + cy) * S) * hdPitch) + (x * S);
-			
 			for (int cx = 0; cx < surface.w; cx++) {
 				if (srcRow[cx]) {
 					for (int sx = 0; sx < S; sx++) dstRow1[(cx * S) + sx] = srcRow[cx];
 				}
 			}
-			for (int sy = 1; sy < S; sy++) {
-				memcpy(hdPixels + (((y + cy) * S + sy) * hdPitch) + (x * S), dstRow1, surface.w * S);
-			}
+			for (int sy = 1; sy < S; sy++) memcpy(hdPixels + (((y + cy) * S + sy) * hdPitch) + (x * S), dstRow1, surface.w * S);
 		}
 	}
 }
@@ -252,127 +147,120 @@ void Screen::clear() {
 
 void Screen::drawWideScreenBars(int16 barSize) const {
 	if (barSize > 0) {
-		_vm->_system->fillScreen(Common::Rect(0, 0, ASYLUM_SCREEN_WIDTH, barSize * ASYLUM_SCALE_FACTOR), 0);
-		_vm->_system->fillScreen(Common::Rect(0, ASYLUM_SCREEN_HEIGHT - (barSize * ASYLUM_SCALE_FACTOR), ASYLUM_SCREEN_WIDTH, ASYLUM_SCREEN_HEIGHT), 0);
+		int S = ASYLUM_SCALE_FACTOR;
+		if (S == 1) {
+			_vm->_system->fillScreen(Common::Rect(0, 0, LOGICAL_WIDTH, barSize), 0);
+			_vm->_system->fillScreen(Common::Rect(0, LOGICAL_HEIGHT - barSize, LOGICAL_WIDTH, LOGICAL_HEIGHT), 0);
+		} else {
+			_vm->_system->fillScreen(Common::Rect(0, 0, ASYLUM_SCREEN_WIDTH, barSize * S), 0);
+			_vm->_system->fillScreen(Common::Rect(0, ASYLUM_SCREEN_HEIGHT - (barSize * S), ASYLUM_SCREEN_WIDTH, ASYLUM_SCREEN_HEIGHT), 0);
+		}
 	}
 }
 
 void Screen::fillRect(int16 x, int16 y, int16 width, int16 height, uint32 color) {
 	_backBuffer.fillRect(Common::Rect(x, y, x + width, y + height), color);
 	int S = ASYLUM_SCALE_FACTOR;
-	_hdBackBuffer.fillRect(Common::Rect(x * S, y * S, (x + width) * S, (y + height) * S), color);
+	if (S > 1) _hdBackBuffer.fillRect(Common::Rect(x * S, y * S, (x + width) * S, (y + height) * S), color);
 }
 
 void Screen::copyBackBufferToScreen() {
-	// No more looping! Just blast the HD buffer straight to the monitor!
-	_vm->_system->copyRectToScreen((byte *)_hdBackBuffer.getPixels(), _hdBackBuffer.w, 0, 0, _hdBackBuffer.w, _hdBackBuffer.h);
+	int S = ASYLUM_SCALE_FACTOR;
+	// SMART OUTPUT: Send the correct buffer based on the user's setting!
+	if (S > 1) {
+		_vm->_system->copyRectToScreen((byte *)_hdBackBuffer.getPixels(), _hdBackBuffer.w, 0, 0, _hdBackBuffer.w, _hdBackBuffer.h);
+	} else {
+		_vm->_system->copyRectToScreen((byte *)_backBuffer.getPixels(), _backBuffer.w, 0, 0, _backBuffer.w, _backBuffer.h);
+	}
 }
 
 void Screen::clip(Common::Rect *source, Common::Rect *destination, int32 flags) const {
-	int16 diffLeft = 0 - destination->left;
+	int16 diffLeft = _clipRect.left - destination->left;
 	if (diffLeft > 0) {
-		destination->left = 0;
+		destination->left = _clipRect.left;
 		if (flags & 2) source->right -= diffLeft;
 		else source->left  += diffLeft;
 	}
-
-	int16 diffRight = destination->right - LOGICAL_WIDTH;
+	int16 diffRight = destination->right - _clipRect.right;
 	if (diffRight > 0) {
 		destination->right -= diffRight;
 		if (flags & 2) source->left  += diffRight;
 		else source->right -= diffRight;
 	}
-
-	int16 diffTop = 0 - destination->top;
+	int16 diffTop = _clipRect.top - destination->top;
 	if (diffTop > 0) {
-		destination->top = 0;
+		destination->top = _clipRect.top;
 		source->top += diffTop;
 	}
-
-	int16 diffBottom = destination->bottom - LOGICAL_HEIGHT;
+	int16 diffBottom = destination->bottom - _clipRect.bottom;
 	if (diffBottom > 0) {
 		source->bottom -= diffBottom;
 		destination->bottom -= diffBottom;
 	}
 }
 
-//////////////////////////////////////////////////////////////////////////
-// Graphic Data (1x Blitters)
-//////////////////////////////////////////////////////////////////////////
+// --------------------------------------------------------------------------------------
+// THE HD BLITTERS: We receive a pre-scaled HD surface, but 1x coordinates!
+// --------------------------------------------------------------------------------------
 void Screen::blit(GraphicFrame *frame, Common::Rect *source, Common::Rect *destination, int32 flags) {
-	if (!_transTable)
-			error("[Screen::blit] Transparency table buffer not initialized");
+	if (!_transTable) error("[Screen::blit] Transparency table buffer not initialized");
+
+	int S = ASYLUM_SCALE_FACTOR;
+	
+	// If the surface is HD (width > original 1x rect), we write to _hdBackBuffer!
+	bool isHD = (frame->surface.w > source->width() && S > 1);
+
+	// Calculate target geometry
+	Common::Rect s_src(source->left * (isHD ? S : 1), source->top * (isHD ? S : 1), source->right * (isHD ? S : 1), source->bottom * (isHD ? S : 1));
+	Common::Rect s_dst(destination->left * (isHD ? S : 1), destination->top * (isHD ? S : 1), destination->right * (isHD ? S : 1), destination->bottom * (isHD ? S : 1));
+
+	uint16 fPitch = frame->surface.pitch;
+	uint16 bPitch = isHD ? _hdBackBuffer.pitch : _backBuffer.pitch;
+
+	byte *dstBase = (isHD ? (byte *)_hdBackBuffer.getPixels() : (byte *)_backBuffer.getPixels()) + (s_dst.top * bPitch) + s_dst.left;
+	byte *srcBase = (byte *)frame->surface.getPixels() + (s_src.top * fPitch) + s_src.left;
+	byte *srcMirror = (byte *)frame->surface.getPixels() + (s_src.top * fPitch) + s_src.right - 1;
+
+	// Also write the 1x version to the Game Brain to fix Dirty Rect Ghosting!
+	if (isHD) {
+		byte *dstBrain = (byte *)_backBuffer.getPixels() + (destination->top * _backBuffer.pitch) + destination->left;
+		byte *srcBrain = (byte *)frame->surface.getPixels() + (s_src.top * fPitch) + s_src.left;
+		blitRawColorKey(dstBrain, srcBrain, destination->height(), destination->width(), (fPitch * S) - destination->width(), _backBuffer.pitch - destination->width());
+	}
 
 	if ((uint32)flags & 0x80000000) {
 		int32 flagSet = flags & 0x7FFFFFFF;
 		bool hasTransTableIndex = false;
-
-		if (flags & 0x10000000) {
-			flagSet = flags & 0x6FFFFFFF;
-			hasTransTableIndex = (_transTable ? true : false);
-		}
-
+		if (flags & 0x10000000) { flagSet = flags & 0x6FFFFFFF; hasTransTableIndex = (_transTable ? true : false); }
 		bool isMirrored = (flagSet == kDrawFlagMirrorLeftRight);
 
 		if (hasTransTableIndex) {
-			if (isMirrored) {
-				blitTranstableMirrored((byte *)_backBuffer.getPixels()    + destination->top * _backBuffer.pitch    + destination->left,
-				                       (byte *)frame->surface.getPixels() + source->top      * frame->surface.pitch + source->right - 1,
-				                       destination->height(),
-				                       destination->width(),
-				                       (uint16)destination->width() + frame->surface.pitch,
-				                       _backBuffer.pitch - (uint16)destination->width());
-			} else {
-				blitTranstable((byte *)_backBuffer.getPixels()    + destination->top * _backBuffer.pitch    + destination->left,
-				               (byte *)frame->surface.getPixels() + source->top      * frame->surface.pitch + source->left,
-				               destination->height(),
-				               destination->width(),
-				               frame->surface.pitch - (uint16)destination->width(),
-				               _backBuffer.pitch    - (uint16)destination->width());
-			}
+			if (isMirrored) blitTranstableMirrored(dstBase, srcMirror, s_dst.height(), s_dst.width(), fPitch + s_dst.width(), bPitch - s_dst.width());
+			else blitTranstable(dstBase, srcBase, s_dst.height(), s_dst.width(), fPitch - s_dst.width(), bPitch - s_dst.width());
 		} else if (flagSet) {
 			if (isMirrored) {
-				if (_useColorKey) {
-					blitMirroredColorKey((byte *)_backBuffer.getPixels()    + destination->top * _backBuffer.pitch    + destination->left,
-					                     (byte *)frame->surface.getPixels() + source->top      * frame->surface.pitch + source->right,
-					                     destination->height(),
-					                     destination->width(),
-					                     frame->surface.pitch + (uint16)destination->width(),
-					                     _backBuffer.pitch    - (uint16)destination->width());
-				} else {
-					blitMirrored((byte *)_backBuffer.getPixels()    + destination->top * _backBuffer.pitch    + destination->left,
-					             (byte *)frame->surface.getPixels() + source->top      * frame->surface.pitch + source->right,
-					             destination->height(),
-					             destination->width(),
-					             frame->surface.pitch + (uint16)destination->width(),
-					             _backBuffer.pitch    - (uint16)destination->width());
-				}
+				if (_useColorKey) blitMirroredColorKey(dstBase, srcMirror, s_dst.height(), s_dst.width(), fPitch + s_dst.width(), bPitch - s_dst.width());
+				else blitMirrored(dstBase, srcMirror, s_dst.height(), s_dst.width(), fPitch + s_dst.width(), bPitch - s_dst.width());
 			}
 		} else {
-			if (_useColorKey) {
-				blitRawColorKey((byte *)_backBuffer.getPixels()    + destination->top * _backBuffer.pitch    + destination->left,
-				                (byte *)frame->surface.getPixels() + source->top      * frame->surface.pitch + source->left,
-				                destination->height(),
-				                destination->width(),
-				                frame->surface.pitch - (uint16)destination->width(),
-				                _backBuffer.pitch    - (uint16)destination->width());
-			} else {
-				blitRaw((byte *)_backBuffer.getPixels()    + destination->top * _backBuffer.pitch    + destination->left,
-				        (byte *)frame->surface.getPixels() + source->top      * frame->surface.pitch + source->left,
-				        destination->height(),
-				        destination->width(),
-				        frame->surface.pitch - (uint16)destination->width(),
-				        _backBuffer.pitch    - (uint16)destination->width());
-			}
+			if (_useColorKey) blitRawColorKey(dstBase, srcBase, s_dst.height(), s_dst.width(), fPitch - s_dst.width(), bPitch - s_dst.width());
+			else blitRaw(dstBase, srcBase, s_dst.height(), s_dst.width(), fPitch - s_dst.width(), bPitch - s_dst.width());
 		}
 	} else if (flags) {
-		blt(destination, frame, source, flags);
+		if (isHD) {
+			if (_useColorKey) copyToBackBufferWithTransparency((byte *)frame->surface.getBasePtr(s_src.left, s_src.top), fPitch, s_dst.left, s_dst.top, s_src.width(), s_src.height(), (bool)(flags & kDrawFlagMirrorLeftRight), true);
+			else copyToBackBuffer((byte *)frame->surface.getBasePtr(s_src.left, s_src.top), fPitch, s_dst.left, s_dst.top, s_src.width(), s_src.height(), (bool)(flags & kDrawFlagMirrorLeftRight), true);
+		} else {
+			blt(destination, frame, source, flags);
+		}
 	} else {
-		bltFast(destination->left, destination->top, frame, source);
+		if (isHD) {
+			if (_useColorKey) _hdBackBuffer.copyRectToSurfaceWithKey(frame->surface, s_dst.left, s_dst.top, s_src, 0x00);
+			else _hdBackBuffer.copyRectToSurface(frame->surface, s_dst.left, s_dst.top, s_src);
+		} else {
+			bltFast(destination->left, destination->top, frame, source);
+		}
 	}
-
-	if (g_debugDrawRects)
-		_backBuffer.frameRect(*destination, 0x220);
 }
 
 void Screen::blitTranstable(byte *dstBuffer, byte *srcBuffer, int16 height, int16 width, uint16 srcPitch, uint16 dstPitch) const {
@@ -441,35 +329,42 @@ void Screen::blitRawColorKey(byte *dstBuffer, byte *srcBuffer, int16 height, int
 	}
 }
 
+// --------------------------------------------------------------------------------------
+// HD MASKING STENCIL
+// --------------------------------------------------------------------------------------
 void Screen::blitMasked(GraphicFrame *frame, Common::Rect *source, byte *maskData, Common::Rect *sourceMask, Common::Rect *destMask, uint16 maskWidth, Common::Rect *destination, int32 flags) {
+	int S = ASYLUM_SCALE_FACTOR;
+	bool isHD = (frame->surface.w > source->width() && S > 1);
+
 	byte *frameBuffer = (byte *)frame->surface.getPixels();
 	byte *mirroredBuffer = nullptr;
 	int16 frameRight = frame->surface.pitch;
-	uint16 maskHeight = (uint16)sourceMask->height(); 
 	byte nSkippedBits = ABS(sourceMask->left) % 8;
 
+	// Note: We use 1x source clipping bounds so we match the exact dimensions of the 1x Stencil!
 	if (flags & kDrawFlagMirrorLeftRight) {
-		mirroredBuffer = (byte *)malloc((size_t)(source->right * source->bottom));
-		if (!mirroredBuffer) error("[Screen::blitMasked] Cannot allocate buffer for mirrored surface");
-		blitMirrored(mirroredBuffer, frameBuffer + source->right - 1, source->bottom, source->right, (uint16)(source->right + frame->surface.pitch), 0);
+		int mwW = isHD ? source->right * S : source->right;
+		int mwH = isHD ? source->bottom * S : source->bottom;
+		mirroredBuffer = (byte *)malloc(mwW * mwH);
+		blitMirrored(mirroredBuffer, frameBuffer + mwW - 1, mwH, mwW, mwW + frameRight, 0);
 		frameBuffer = mirroredBuffer;
-		frameRight = source->right;
+		frameRight = mwW;
 		source->right -= source->left;
 		source->left = 0;
 	}
 
-	byte *frameBufferPtr = frameBuffer + source->top * frameRight + source->left;
+	byte *frameBufferPtr = frameBuffer + (source->top * (isHD?S:1)) * frameRight + (source->left * (isHD?S:1));
 	byte *maskBufferPtr  = maskData    + sourceMask->top * (maskWidth / 8) + sourceMask->left / 8;
 
-	if ((destMask->left    + sourceMask->width())  < destination->left
-	 || (destination->left + source->width())      < destMask->left
-	 || (destMask->top     + sourceMask->height()) < destination->top
-	 || (destination->top  + source->height())     < destMask->top) {
-		blitRawColorKey((byte *)_backBuffer.getPixels() + destination->top * _backBuffer.pitch + destination->left,
-		                frameBufferPtr, source->height(), source->width(),
-		                (uint16)(frameRight - source->width()), (uint16)(_backBuffer.pitch - source->width()));
+	if ((destMask->left + sourceMask->width()) < destination->left || (destination->left + source->width()) < destMask->left ||
+	    (destMask->top + sourceMask->height()) < destination->top || (destination->top + source->height()) < destMask->top) {
+		
+		if (isHD) {
+			blitRawColorKey((byte *)_hdBackBuffer.getPixels() + (destination->top*S) * _hdBackBuffer.pitch + (destination->left*S), frameBufferPtr, source->height()*S, source->width()*S, frameRight - (source->width()*S), _hdBackBuffer.pitch - (source->width()*S));
+		} else {
+			blitRawColorKey((byte *)_backBuffer.getPixels() + destination->top * _backBuffer.pitch + destination->left, frameBufferPtr, source->height(), source->width(), frameRight - source->width(), _backBuffer.pitch - source->width());
+		}
 		free(mirroredBuffer);
-		if (g_debugDrawRects) _backBuffer.frameRect(*destMask, 0x220);
 		return;
 	}
 
@@ -478,123 +373,102 @@ void Screen::blitMasked(GraphicFrame *frame, Common::Rect *source, byte *maskDat
 		maskBufferPtr += (destination->left - destMask->left) / 8 + nSkippedBits / 8;
 		nSkippedBits %= 8;
 		sourceMask->setWidth(sourceMask->width() + destMask->left - destination->left);
+		frameBufferPtr += (destMask->left - destination->left) * (isHD?S:1);
 		destMask->left = destination->left;
 	}
 
 	if (destination->top > destMask->top) {
 		maskBufferPtr += (destination->top - destMask->top) * maskWidth / 8;
 		sourceMask->setHeight(sourceMask->height() + destMask->top - destination->top);
+		frameBufferPtr += (destination->top - destMask->top) * (isHD?S:1) * frameRight;
 		destMask->top = destination->top;
 	}
 
 	if (destination->left < destMask->left) {
-		blitRawColorKey((byte *)_backBuffer.getPixels() + destination->top * _backBuffer.pitch + destination->left,
-		                frameBufferPtr, source->height(), destMask->left - destination->left,
-		                (uint16)(frameRight + destination->left - destMask->left),
-		                (uint16)(_backBuffer.pitch + destination->left - destMask->left));
-		if (g_debugDrawRects) _backBuffer.frameRect(Common::Rect(destination->left, destination->top, destMask->left, destination->top + source->height()), 0x10);
-		frameBufferPtr += destMask->left - destination->left;
-		source->setWidth(source->width() + destination->left - destMask->left);
+		int pW = destMask->left - destination->left;
+		if (isHD) blitRawColorKey((byte *)_hdBackBuffer.getPixels() + (destination->top*S) * _hdBackBuffer.pitch + (destination->left*S), frameBufferPtr, source->height()*S, pW*S, frameRight - (pW*S), _hdBackBuffer.pitch - (pW*S));
+		else blitRawColorKey((byte *)_backBuffer.getPixels() + destination->top * _backBuffer.pitch + destination->left, frameBufferPtr, source->height(), pW, frameRight - pW, _backBuffer.pitch - pW);
+		frameBufferPtr += pW * (isHD?S:1);
+		source->setWidth(source->width() - pW);
 		destination->left = destMask->left;
 	}
 
 	if ((source->width() + destination->left) > (destMask->left + sourceMask->width())) {
-		blitRawColorKey((byte *)_backBuffer.getPixels() + destination->top * _backBuffer.pitch + destMask->left + sourceMask->width(),
-		                frameBufferPtr + destMask->left + sourceMask->width() - destination->left,
-		                source->height(), source->width() + destination->left - (destMask->left + sourceMask->width()),
-		                (uint16)(frameRight + destMask->left + sourceMask->width() - (destination->left + source->width())),
-		                (uint16)(_backBuffer.pitch + destMask->left + sourceMask->width() - (destination->left + source->width())));
-		if (g_debugDrawRects) _backBuffer.frameRect(Common::Rect(destMask->left, destination->top, destMask->left + source->width(), destination->top + source->height()), 0x36);
-		source->setWidth(destMask->left + sourceMask->width() - destination->left);
+		int pW = source->width() + destination->left - (destMask->left + sourceMask->width());
+		int oW = destMask->left + sourceMask->width() - destination->left;
+		if (isHD) blitRawColorKey((byte *)_hdBackBuffer.getPixels() + (destination->top*S) * _hdBackBuffer.pitch + (destMask->left + sourceMask->width())*S, frameBufferPtr + (oW*S), source->height()*S, pW*S, frameRight - (pW*S), _hdBackBuffer.pitch - (pW*S));
+		else blitRawColorKey((byte *)_backBuffer.getPixels() + destination->top * _backBuffer.pitch + destMask->left + sourceMask->width(), frameBufferPtr + oW, source->height(), pW, frameRight - pW, _backBuffer.pitch - pW);
+		source->setWidth(oW);
 	}
 
 	if (destination->top < destMask->top) {
-		blitRawColorKey((byte *)_backBuffer.getPixels() + destination->top * _backBuffer.pitch + destination->left,
-		                frameBufferPtr, destMask->top - destination->top, source->width(),
-		                (uint16)(frameRight - source->width()), (uint16)(_backBuffer.pitch - source->width()));
-		if (g_debugDrawRects) _backBuffer.frameRect(Common::Rect(destination->left, destination->top, destination->left + source->width(), destMask->top), 0x23);
-		frameBufferPtr += (destMask->top - destination->top) * frameRight;
-		source->setHeight(source->height() + destination->top - destMask->top);
+		int pH = destMask->top - destination->top;
+		if (isHD) blitRawColorKey((byte *)_hdBackBuffer.getPixels() + (destination->top*S) * _hdBackBuffer.pitch + (destination->left*S), frameBufferPtr, pH*S, source->width()*S, frameRight - (source->width()*S), _hdBackBuffer.pitch - (source->width()*S));
+		else blitRawColorKey((byte *)_backBuffer.getPixels() + destination->top * _backBuffer.pitch + destination->left, frameBufferPtr, pH, source->width(), frameRight - source->width(), _backBuffer.pitch - source->width());
+		frameBufferPtr += pH * (isHD?S:1) * frameRight;
+		source->setHeight(source->height() - pH);
 		destination->top = destMask->top;
 	}
 
 	if ((source->height() + destination->top) > (destMask->top + sourceMask->height())) {
-		blitRawColorKey((byte *)_backBuffer.getPixels() + (destMask->top + sourceMask->height()) * _backBuffer.pitch + destination->left,
-		                frameBufferPtr + (destMask->top + sourceMask->height() - destination->top) * frameRight,
-		                destination->top + source->height() - (sourceMask->height() + destMask->top), source->width(),
-		                (uint16)(frameRight - source->width()), (uint16)(_backBuffer.pitch - source->width()));
-		source->setHeight(destMask->top + sourceMask->height() - destination->top);
+		int pH = destination->top + source->height() - (sourceMask->height() + destMask->top);
+		int oH = sourceMask->height() + destMask->top - destination->top;
+		if (isHD) blitRawColorKey((byte *)_hdBackBuffer.getPixels() + ((destMask->top + sourceMask->height())*S) * _hdBackBuffer.pitch + (destination->left*S), frameBufferPtr + (oH*S) * frameRight, pH*S, source->width()*S, frameRight - (source->width()*S), _hdBackBuffer.pitch - (source->width()*S));
+		else blitRawColorKey((byte *)_backBuffer.getPixels() + (destMask->top + sourceMask->height()) * _backBuffer.pitch + destination->left, frameBufferPtr + oH * frameRight, pH, source->width(), frameRight - source->width(), _backBuffer.pitch - source->width());
+		source->setHeight(oH);
 	}
 
-	bltMasked(frameBufferPtr, maskBufferPtr, source->height(), source->width(),
-	          (uint16)(frameRight - source->width()), (uint16)(maskWidth - (nSkippedBits + source->width())) / 8,
-	          nSkippedBits, (byte *)_backBuffer.getPixels() + _backBuffer.pitch * destination->top + destination->left,
-	          (uint16)(_backBuffer.pitch - source->width()));
-
-	if (g_debugDrawRects) {
-		_backBuffer.frameRect(*destination, 0x128);
-		drawZoomedMask(maskData, maskHeight / 8, maskWidth / 8, maskWidth);
+	if (isHD) {
+		bltMasked(frameBufferPtr, maskBufferPtr, source->height(), source->width(), frameRight, maskWidth, nSkippedBits, (byte *)_hdBackBuffer.getPixels() + (destination->top*S) * _hdBackBuffer.pitch + (destination->left*S), _hdBackBuffer.pitch);
+	} else {
+		bltMasked(frameBufferPtr, maskBufferPtr, source->height(), source->width(), frameRight, maskWidth, nSkippedBits, (byte *)_backBuffer.getPixels() + destination->top * _backBuffer.pitch + destination->left, _backBuffer.pitch);
 	}
+
 	free(mirroredBuffer);
 }
 
 void Screen::drawZoomedMask(byte *mask, uint16 height, uint16 width, uint16 maskPitch) {
-	uint16 zoom = 7;
-	byte *dstBuffer = (byte *)_backBuffer.getPixels();
-	uint16 dstPitch = (uint16)(_backBuffer.pitch - (width * zoom));
-	uint16 srcPitch = maskPitch;
-	byte *srcBuffer = mask;
-
-	height *= zoom;
-	while (height--) {
-		for (int16 i = 0; i < width; i++) {
-			for (int j = 0; j < zoom; j++) {
-				*dstBuffer = *srcBuffer;
-				dstBuffer++;
-			}
-			srcBuffer++;
-		}
-		dstBuffer += dstPitch;
-		srcBuffer += (height % zoom) ? -width : srcPitch;
-	}
 }
 
 void Screen::bltMasked(byte *srcBuffer, byte *maskBuffer, int16 height, int16 width, uint16 srcPitch, uint16 maskPitch, byte nSkippedBits, byte *dstBuffer, uint16 dstPitch) const {
-	if (nSkippedBits > 7) error("[Screen::bltMasked] Invalid number of skipped bits (was: %d, max: 7)", nSkippedBits);
+	if (nSkippedBits > 7) error("[Screen::bltMasked] Invalid number of skipped bits");
 
-	while (height--) {
+	int S = ASYLUM_SCALE_FACTOR;
+	bool isHD = (srcPitch > width * 2); // Quick heuristic to tell if we are in the HD loop!
+
+	for (int16 y = 0; y < height; y++) {
+		byte *dstRow = dstBuffer + (y * (isHD?S:1) * dstPitch);
+		byte *srcRow = srcBuffer + (y * (isHD?S:1) * srcPitch);
+		byte *maskPtr = maskBuffer + (y * (maskPitch / 8));
+		
 		int run = 7 - nSkippedBits;
-		uint skip = *maskBuffer >> nSkippedBits;
+		uint skip = *maskPtr >> nSkippedBits;
 
-		for (int16 i = 0; i < width; i++) {
-			if (*srcBuffer && !(skip & 1)) *dstBuffer = *srcBuffer;
-			dstBuffer++; srcBuffer++;
-
-			if (i == width - 1) break;
-
-			run--;
-			if (run < 0) {
-				++maskBuffer;
-				run  = 7;
-				skip = *maskBuffer;
-			} else {
-				skip >>= 1;
+		for (int16 x = 0; x < width; x++) {
+			if (!(skip & 1)) {
+				if (isHD) {
+					for (int sy = 0; sy < S; sy++) {
+						for (int sx = 0; sx < S; sx++) {
+							byte c = srcRow[(sy * srcPitch) + (x * S) + sx];
+							if (c) dstRow[(sy * dstPitch) + (x * S) + sx] = c;
+						}
+					}
+				} else {
+					byte c = srcRow[x];
+					if (c) dstRow[x] = c;
+				}
 			}
+			if (x == width - 1) break;
+			run--;
+			if (run < 0) { maskPtr++; run = 7; skip = *maskPtr; }
+			else skip >>= 1;
 		}
-		dstBuffer  += dstPitch;
-		srcBuffer  += srcPitch;
-		maskBuffer += maskPitch + 1;
 	}
 }
 
 void Screen::blt(Common::Rect *dest, GraphicFrame *frame, Common::Rect *source, int32 flags) {
-	if (_useColorKey) {
-		copyToBackBufferWithTransparency((byte *)frame->surface.getBasePtr(source->left, source->top), frame->surface.pitch,
-		                                 dest->left, dest->top, (uint16)source->width(), (uint16)source->height(), (bool)(flags & kDrawFlagMirrorLeftRight));
-	} else {
-		copyToBackBuffer((byte *)frame->surface.getBasePtr(source->left, source->top), frame->surface.pitch,
-		                 dest->left, dest->top, (uint16)source->width(), (uint16)source->height(), (bool)(flags & kDrawFlagMirrorLeftRight));
-	}
+	if (_useColorKey) copyToBackBufferWithTransparency((byte *)frame->surface.getBasePtr(source->left, source->top), frame->surface.pitch, dest->left, dest->top, (uint16)source->width(), (uint16)source->height(), (bool)(flags & kDrawFlagMirrorLeftRight));
+	else copyToBackBuffer((byte *)frame->surface.getBasePtr(source->left, source->top), frame->surface.pitch, dest->left, dest->top, (uint16)source->width(), (uint16)source->height(), (bool)(flags & kDrawFlagMirrorLeftRight));
 }
 
 void Screen::bltFast(int16 dX, int16 dY, GraphicFrame *frame, Common::Rect *source) {
@@ -603,62 +477,68 @@ void Screen::bltFast(int16 dX, int16 dY, GraphicFrame *frame, Common::Rect *sour
 	else _backBuffer.copyRectToSurface(frame->surface, dX, dY, *source);
 }
 
-void Screen::copyToBackBuffer(const byte *buffer, int32 pitch, int16 x, int16 y, uint16 width, uint16 height, bool mirrored) {
+void Screen::copyToBackBuffer(const byte *buffer, int32 pitch, int16 x, int16 y, uint16 width, uint16 height, bool mirrored, bool isHD) {
 	if (!buffer || width == 0 || height == 0) return;
 	
 	if (!mirrored) {
-		_backBuffer.copyRectToSurface(buffer, pitch, x, y, width, height);
-
-		int S = ASYLUM_SCALE_FACTOR;
-		if (S > 1) {
-			byte *hdPixels = (byte *)_hdBackBuffer.getPixels();
-			uint32 hdPitch = _hdBackBuffer.pitch;
-
-			for (int cy = 0; cy < height; cy++) {
-				const byte *srcRow = buffer + (cy * pitch);
-				byte *dstRow1 = hdPixels + (((y + cy) * S) * hdPitch) + (x * S);
-				
-				// Scale X incredibly fast
-				for (int cx = 0; cx < width; cx++) {
-					byte c = srcRow[cx];
-					for (int sx = 0; sx < S; sx++) dstRow1[(cx * S) + sx] = c;
-				}
-				// Clone Y rows using high-speed memcpy!
-				for (int sy = 1; sy < S; sy++) {
-					memcpy(hdPixels + (((y + cy) * S + sy) * hdPitch) + (x * S), dstRow1, width * S);
+		if (isHD) {
+			_hdBackBuffer.copyRectToSurface(buffer, pitch, x, y, width, height);
+		} else {
+			_backBuffer.copyRectToSurface(buffer, pitch, x, y, width, height);
+			int S = ASYLUM_SCALE_FACTOR;
+			if (S > 1) {
+				byte *hdPixels = (byte *)_hdBackBuffer.getPixels();
+				for (int cy = 0; cy < height; cy++) {
+					const byte *srcRow = buffer + (cy * pitch);
+					byte *dstRow = hdPixels + ((y + cy) * S * _hdBackBuffer.pitch) + (x * S);
+					for (int cx = 0; cx < width; cx++) {
+						byte c = srcRow[cx];
+						for (int sx = 0; sx < S; sx++) dstRow[(cx * S) + sx] = c;
+					}
+					for (int sy = 1; sy < S; sy++) memcpy(hdPixels + (((y + cy) * S + sy) * _hdBackBuffer.pitch) + (x * S), dstRow, width * S);
 				}
 			}
 		}
 	} else {
-		error("[Screen::copyToBackBuffer] Mirrored drawing not implemented (no color key)");
+		error("[Screen::copyToBackBuffer] Mirrored drawing not implemented");
 	}
 }
 
-void Screen::copyToBackBufferWithTransparency(byte *buffer, int32 pitch, int16 x, int16 y, uint16 width, uint16 height, bool mirrored) {
-	byte *dest = (byte *)_backBuffer.getPixels();
+void Screen::copyToBackBufferWithTransparency(byte *buffer, int32 pitch, int16 x, int16 y, uint16 width, uint16 height, bool mirrored, bool isHD) {
 	int32 left = (x < 0) ? -x : 0;
 	int32 top = (y < 0) ? -y : 0;
-	int32 right = (x + width > LOGICAL_WIDTH) ? LOGICAL_WIDTH - abs(x) : width;
-	int32 bottom = (y + height > LOGICAL_HEIGHT) ? LOGICAL_HEIGHT - abs(y) : height;
+	int32 right = (x + width > (isHD ? ASYLUM_SCREEN_WIDTH : LOGICAL_WIDTH)) ? (isHD ? ASYLUM_SCREEN_WIDTH : LOGICAL_WIDTH) - abs(x) : width;
+	int32 bottom = (y + height > (isHD ? ASYLUM_SCREEN_HEIGHT : LOGICAL_HEIGHT)) ? (isHD ? ASYLUM_SCREEN_HEIGHT : LOGICAL_HEIGHT) - abs(y) : height;
 
-	for (int32 curY = top; curY < bottom; curY++) {
-		for (int32 curX = left; curX < right; curX++) {
-			uint32 offset = (uint32)((mirrored ? right - (curX + 1) : curX) + curY * pitch);
-			if (buffer[offset] != 0) dest[x + curX + (y + curY) * LOGICAL_WIDTH] = buffer[offset];
-		}
-	}
-
-	int S = ASYLUM_SCALE_FACTOR;
-	if (S > 1) {
-		byte *hdDest = (byte *)_hdBackBuffer.getPixels();
+	if (isHD) {
+		byte *dest = (byte *)_hdBackBuffer.getPixels();
 		for (int32 curY = top; curY < bottom; curY++) {
 			for (int32 curX = left; curX < right; curX++) {
 				uint32 offset = (uint32)((mirrored ? right - (curX + 1) : curX) + curY * pitch);
-				if (buffer[offset] != 0) {
-					byte color = buffer[offset];
-					for (int sy = 0; sy < S; sy++) {
-						for (int sx = 0; sx < S; sx++) {
-							hdDest[((x + curX) * S + sx) + ((y + curY) * S + sy) * ASYLUM_SCREEN_WIDTH] = color;
+				if (buffer[offset] != 0) dest[x + curX + (y + curY) * _hdBackBuffer.pitch] = buffer[offset];
+			}
+		}
+	} else {
+		byte *dest = (byte *)_backBuffer.getPixels();
+		for (int32 curY = top; curY < bottom; curY++) {
+			for (int32 curX = left; curX < right; curX++) {
+				uint32 offset = (uint32)((mirrored ? right - (curX + 1) : curX) + curY * pitch);
+				if (buffer[offset] != 0) dest[x + curX + (y + curY) * LOGICAL_WIDTH] = buffer[offset];
+			}
+		}
+
+		int S = ASYLUM_SCALE_FACTOR;
+		if (S > 1) {
+			byte *hdDest = (byte *)_hdBackBuffer.getPixels();
+			for (int32 curY = top; curY < bottom; curY++) {
+				for (int32 curX = left; curX < right; curX++) {
+					uint32 offset = (uint32)((mirrored ? right - (curX + 1) : curX) + curY * pitch);
+					if (buffer[offset] != 0) {
+						byte color = buffer[offset];
+						for (int sy = 0; sy < S; sy++) {
+							for (int sx = 0; sx < S; sx++) {
+								hdDest[((x + curX) * S + sx) + ((y + curY) * S + sy) * ASYLUM_SCREEN_WIDTH] = color;
+							}
 						}
 					}
 				}
@@ -667,9 +547,9 @@ void Screen::copyToBackBufferWithTransparency(byte *buffer, int32 pitch, int16 x
 	}
 }
 
-//////////////////////////////////////////////////////////////////////////
-// Palette
-//////////////////////////////////////////////////////////////////////////
+// ... PASTE REMAINDER OF SCREEN.CPP HERE ...
+// (Palette management and Sound functions remain IDENTICAL to the file you pasted)
+
 byte *Screen::getPaletteData(ResourceId id) {
 	ResourceEntry *resource = getResource()->get(id);
 	byte flag = *(resource->data + 5);
@@ -1089,20 +969,22 @@ void Screen::deleteGraphicFromQueue(ResourceId resourceId) {
 void Screen::drawLine(const Common::Point &source, const Common::Point &destination, uint32 color) {
 	int scale = ASYLUM_SCALE_FACTOR;
 	_backBuffer.drawLine(source.x, source.y, destination.x, destination.y, color);
-	_hdBackBuffer.drawLine(source.x * scale, source.y * scale, destination.x * scale, destination.y * scale, color);
+	if (scale > 1) _hdBackBuffer.drawLine(source.x * scale, source.y * scale, destination.x * scale, destination.y * scale, color);
 }
 
 void Screen::drawLine(const int16 (*srcPtr)[2], const int16 (*dstPtr)[2], uint32 color) {
 	int scale = ASYLUM_SCALE_FACTOR;
 	_backBuffer.drawLine((*srcPtr)[0], (*srcPtr)[1], (*dstPtr)[0], (*dstPtr)[1], color);
-	_hdBackBuffer.drawLine((*srcPtr)[0] * scale, (*srcPtr)[1] * scale, (*dstPtr)[0] * scale, (*dstPtr)[1] * scale, color);
+	if (scale > 1) _hdBackBuffer.drawLine((*srcPtr)[0] * scale, (*srcPtr)[1] * scale, (*dstPtr)[0] * scale, (*dstPtr)[1] * scale, color);
 }
 
 void Screen::drawRect(const Common::Rect &rect, uint32 color) {
 	int scale = ASYLUM_SCALE_FACTOR;
 	_backBuffer.frameRect(rect, color);
-	Common::Rect s_rect(rect.left * scale, rect.top * scale, rect.right * scale, rect.bottom * scale);
-	_hdBackBuffer.frameRect(s_rect, color);
+	if (scale > 1) {
+		Common::Rect s_rect(rect.left * scale, rect.top * scale, rect.right * scale, rect.bottom * scale);
+		_hdBackBuffer.frameRect(s_rect, color);
+	}
 }
 
 void Screen::copyToBackBufferClipped(Graphics::Surface *surface, int16 x, int16 y) {
@@ -1121,15 +1003,18 @@ void Screen::copyToBackBufferClipped(Graphics::Surface *surface, int16 x, int16 
 		if (surface->h > LOGICAL_HEIGHT)
 			startY = getWorld()->yTop;
 
+		// 1x Draw
 		_vm->screen()->copyToBackBufferWithTransparency(
-			((byte *)surface->getPixels()) +
-			startY * surface->pitch +
-			startX * surface->format.bytesPerPixel,
-			surface->pitch,
-			animRect.left,
-			animRect.top,
-			(uint16)animRect.width(),
-			(uint16)animRect.height());
+			((byte *)surface->getPixels()) + startY * surface->pitch + startX * surface->format.bytesPerPixel,
+			surface->pitch, animRect.left, animRect.top, (uint16)animRect.width(), (uint16)animRect.height(), false, false);
+			
+		// HD Draw
+		int S = ASYLUM_SCALE_FACTOR;
+		if (S > 1) {
+			_vm->screen()->copyToBackBufferWithTransparency(
+				((byte *)surface->getPixels()) + startY * surface->pitch + startX * surface->format.bytesPerPixel,
+				surface->pitch, animRect.left, animRect.top, (uint16)animRect.width(), (uint16)animRect.height(), false, true);
+		}
 	}
 }
 
