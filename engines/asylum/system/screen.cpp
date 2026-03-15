@@ -222,6 +222,26 @@ void Screen::draw(GraphicResource *resource, uint32 frameIndex, const Common::Po
 
 void Screen::draw(const Graphics::Surface &surface, int x, int y) {
 	_backBuffer.copyRectToSurface(surface, x, y, Common::Rect(0, 0, surface.w, surface.h));
+
+	int S = ASYLUM_SCALE_FACTOR;
+	if (S > 1) {
+		byte *hdPixels = (byte *)_hdBackBuffer.getPixels();
+		uint32 hdPitch = _hdBackBuffer.pitch;
+
+		for (int cy = 0; cy < surface.h; cy++) {
+			const byte *srcRow = (const byte *)surface.getBasePtr(0, cy);
+			byte *dstRow1 = hdPixels + (((y + cy) * S) * hdPitch) + (x * S);
+			
+			for (int cx = 0; cx < surface.w; cx++) {
+				if (srcRow[cx]) {
+					for (int sx = 0; sx < S; sx++) dstRow1[(cx * S) + sx] = srcRow[cx];
+				}
+			}
+			for (int sy = 1; sy < S; sy++) {
+				memcpy(hdPixels + (((y + cy) * S + sy) * hdPitch) + (x * S), dstRow1, surface.w * S);
+			}
+		}
+	}
 }
 
 void Screen::clear() {
@@ -239,31 +259,12 @@ void Screen::drawWideScreenBars(int16 barSize) const {
 
 void Screen::fillRect(int16 x, int16 y, int16 width, int16 height, uint32 color) {
 	_backBuffer.fillRect(Common::Rect(x, y, x + width, y + height), color);
+	int S = ASYLUM_SCALE_FACTOR;
+	_hdBackBuffer.fillRect(Common::Rect(x * S, y * S, (x + width) * S, (y + height) * S), color);
 }
 
 void Screen::copyBackBufferToScreen() {
-	int S = ASYLUM_SCALE_FACTOR;
-
-	// DIAGNOSTIC: Do a brute-force nearest-neighbor copy of the Game Brain directly to the Monitor!
-	// This completely bypasses all the complex HD drawing logic to test if the game is actually running.
-	if (S > 1) {
-		for (int y = 0; y < LOGICAL_HEIGHT; y++) {
-			byte *srcRow = (byte *)_backBuffer.getBasePtr(0, y);
-			byte *dstRow = (byte *)_hdBackBuffer.getBasePtr(0, y * S);
-			for (int x = 0; x < LOGICAL_WIDTH; x++) {
-				byte c = srcRow[x];
-				for (int sy = 0; sy < S; sy++) {
-					for (int sx = 0; sx < S; sx++) {
-						_hdBackBuffer.setPixel((x * S) + sx, (y * S) + sy, c);
-					}
-				}
-			}
-		}
-	} else {
-		// At 1x, just copy it directly!
-		_hdBackBuffer.copyFrom(_backBuffer);
-	}
-
+	// No more looping! Just blast the HD buffer straight to the monitor!
 	_vm->_system->copyRectToScreen((byte *)_hdBackBuffer.getPixels(), _hdBackBuffer.w, 0, 0, _hdBackBuffer.w, _hdBackBuffer.h);
 }
 
@@ -607,16 +608,24 @@ void Screen::copyToBackBuffer(const byte *buffer, int32 pitch, int16 x, int16 y,
 	
 	if (!mirrored) {
 		_backBuffer.copyRectToSurface(buffer, pitch, x, y, width, height);
+
 		int S = ASYLUM_SCALE_FACTOR;
 		if (S > 1) {
+			byte *hdPixels = (byte *)_hdBackBuffer.getPixels();
+			uint32 hdPitch = _hdBackBuffer.pitch;
+
 			for (int cy = 0; cy < height; cy++) {
+				const byte *srcRow = buffer + (cy * pitch);
+				byte *dstRow1 = hdPixels + (((y + cy) * S) * hdPitch) + (x * S);
+				
+				// Scale X incredibly fast
 				for (int cx = 0; cx < width; cx++) {
-					byte c = buffer[cy * pitch + cx];
-					for (int sy = 0; sy < S; sy++) {
-						for (int sx = 0; sx < S; sx++) {
-							_hdBackBuffer.setPixel((x+cx)*S + sx, (y+cy)*S + sy, c);
-						}
-					}
+					byte c = srcRow[cx];
+					for (int sx = 0; sx < S; sx++) dstRow1[(cx * S) + sx] = c;
+				}
+				// Clone Y rows using high-speed memcpy!
+				for (int sy = 1; sy < S; sy++) {
+					memcpy(hdPixels + (((y + cy) * S + sy) * hdPitch) + (x * S), dstRow1, width * S);
 				}
 			}
 		}
