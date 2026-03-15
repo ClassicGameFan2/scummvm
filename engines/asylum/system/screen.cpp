@@ -225,23 +225,7 @@ void Screen::fillRect(int16 x, int16 y, int16 width, int16 height, uint32 color)
 void Screen::copyBackBufferToScreen() {
 	int S = ASYLUM_SCALE_FACTOR;
 	if (S > 1) {
-		// TEXT FIX: Safely upscale any raw text/UI that the engine drew directly to the 1x buffer!
-		const byte *bgPixels = (const byte *)_backBuffer.getPixels();
-		byte *hdPixels = (byte *)_hdBackBuffer.getPixels();
-		for (int y = 0; y < LOGICAL_HEIGHT; y++) {
-			for (int x = 0; x < LOGICAL_WIDTH; x++) {
-				byte color = bgPixels[y * _backBuffer.pitch + x];
-				// Only overlay bright text UI colors (ignoring the black/background colors)
-				// This ensures subtitles appear without overwriting the HD sprites!
-				if (color > 0 && color != _mainPalette[0]) {
-					for (int sy = 0; sy < S; sy++) {
-						for (int sx = 0; sx < S; sx++) {
-							hdPixels[(y * S + sy) * _hdBackBuffer.pitch + (x * S + sx)] = color;
-						}
-					}
-				}
-			}
-		}
+		// Instantly blast the HD buffer to the monitor. No manual looping!
 		_vm->_system->copyRectToScreen((byte *)_hdBackBuffer.getPixels(), _hdBackBuffer.w, 0, 0, _hdBackBuffer.w, _hdBackBuffer.h);
 	} else {
 		_vm->_system->copyRectToScreen((byte *)_backBuffer.getPixels(), _backBuffer.w, 0, 0, _backBuffer.w, _backBuffer.h);
