@@ -225,23 +225,7 @@ void Screen::fillRect(int16 x, int16 y, int16 width, int16 height, uint32 color)
 void Screen::copyBackBufferToScreen() {
 	int S = ASYLUM_SCALE_FACTOR;
 	if (S > 1) {
-		// TEXT FIX: Safely upscale any raw text/UI that the engine drew directly to the 1x buffer!
-		const byte *bgPixels = (const byte *)_backBuffer.getPixels();
-		byte *hdPixels = (byte *)_hdBackBuffer.getPixels();
-		for (int y = 0; y < LOGICAL_HEIGHT; y++) {
-			for (int x = 0; x < LOGICAL_WIDTH; x++) {
-				byte color = bgPixels[y * _backBuffer.pitch + x];
-				// Only overlay bright text UI colors (ignoring the black/background colors)
-				// This ensures subtitles appear without overwriting the HD sprites!
-				if (color > 0 && color != _mainPalette[0]) {
-					for (int sy = 0; sy < S; sy++) {
-						for (int sx = 0; sx < S; sx++) {
-							hdPixels[(y * S + sy) * _hdBackBuffer.pitch + (x * S + sx)] = color;
-						}
-					}
-				}
-			}
-		}
+		// DUMB COPY LOOP DELETED: We now rely on blazingly fast hardware blitting!
 		_vm->_system->copyRectToScreen((byte *)_hdBackBuffer.getPixels(), _hdBackBuffer.w, 0, 0, _hdBackBuffer.w, _hdBackBuffer.h);
 	} else {
 		_vm->_system->copyRectToScreen((byte *)_backBuffer.getPixels(), _backBuffer.w, 0, 0, _backBuffer.w, _backBuffer.h);
@@ -566,10 +550,32 @@ void Screen::bltFast(int16 dX, int16 dY, GraphicFrame *frame, Common::Rect *sour
 
 void Screen::copyToBackBuffer(const byte *buffer, int32 pitch, int16 x, int16 y, uint16 width, uint16 height, bool mirrored, bool isHD) {
 	if (!buffer || width == 0 || height == 0) return;
-	
+
 	if (!mirrored) {
-		if (isHD) _hdBackBuffer.copyRectToSurface(buffer, pitch, x, y, width, height);
-		else _backBuffer.copyRectToSurface(buffer, pitch, x, y, width, height);
+		if (isHD) {
+			_hdBackBuffer.copyRectToSurface(buffer, pitch, x, y, width, height);
+		} else {
+			_backBuffer.copyRectToSurface(buffer, pitch, x, y, width, height);
+			
+			int S = ASYLUM_SCALE_FACTOR;
+			// DIRTY RECT UPSCALE: Instantly push a scaled copy to the HD buffer.
+			// This perfectly upscales Video Frames without scanning the whole screen!
+			if (S > 1 && _backBuffer.w == LOGICAL_WIDTH) {
+				byte *hdDest = (byte *)_hdBackBuffer.getPixels();
+				for (int sy = 0; sy < height; sy++) {
+					const byte *srcRow = buffer + (sy * pitch);
+					for (int S_y = 0; S_y < S; S_y++) {
+						byte *dstRow = hdDest + (((y + sy) * S + S_y) * _hdBackBuffer.pitch);
+						for (int sx = 0; sx < width; sx++) {
+							byte c = srcRow[sx];
+							for (int S_x = 0; S_x < S; S_x++) {
+								dstRow[(x + sx) * S + S_x] = c;
+							}
+						}
+					}
+				}
+			}
+		}
 	} else {
 		error("[Screen::copyToBackBuffer] Mirrored drawing not implemented");
 	}
@@ -595,6 +601,25 @@ void Screen::copyToBackBufferWithTransparency(byte *buffer, int32 pitch, int16 x
 			for (int32 curX = left; curX < right; curX++) {
 				uint32 offset = (uint32)((mirrored ? right - (curX + 1) : curX) + curY * pitch);
 				if (buffer[offset] != 0) dest[x + curX + (y + curY) * _backBuffer.pitch] = buffer[offset];
+			}
+		}
+		
+		int S = ASYLUM_SCALE_FACTOR;
+		// DIRTY RECT UPSCALE: Safely upscale 1x transparent UI components to the HD buffer.
+		if (S > 1 && _backBuffer.w == LOGICAL_WIDTH) {
+			byte *hdDest = (byte *)_hdBackBuffer.getPixels();
+			for (int32 curY = top; curY < bottom; curY++) {
+				for (int32 curX = left; curX < right; curX++) {
+					uint32 offset = (uint32)((mirrored ? right - (curX + 1) : curX) + curY * pitch);
+					byte c = buffer[offset];
+					if (c != 0) {
+						for (int sy = 0; sy < S; sy++) {
+							for (int sx = 0; sx < S; sx++) {
+								hdDest[(x + curX) * S + sx + ((y + curY) * S + sy) * _hdBackBuffer.pitch] = c;
+							}
+						}
+					}
+				}
 			}
 		}
 	}
