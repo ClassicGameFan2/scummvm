@@ -41,6 +41,8 @@
 
 namespace Asylum {
 
+extern int ASYLUM_SCALE_FACTOR;
+
 VideoPlayer::VideoPlayer(AsylumEngine *engine, Audio::Mixer *mixer) : _vm(engine),
 	_currentMovie(0), _subtitleIndex(0), _subtitleCounter(0), _previousFont(kResourceNone), _done(false) {
 
@@ -214,6 +216,26 @@ void VideoPlayer::play(const Common::Path &filename, bool showSubtitles) {
 				if (_decoder->hasDirtyPalette())
 					setupPalette();
 				getScreen()->copyToBackBuffer((const byte *)frame->getPixels(), frame->pitch, x, y, frame->w, frame->h);
+
+				// --- HD VIDEO UPSCALER (KILLS GHOSTING) ---
+				int S = ASYLUM_SCALE_FACTOR;
+				if (S > 1) {
+					Graphics::Surface hdFrame;
+					hdFrame.create(frame->w * S, frame->h * S, frame->format);
+					const byte *srcPx = (const byte *)frame->getPixels();
+					byte *dstPx = (byte *)hdFrame.getPixels();
+					for (int sy = 0; sy < hdFrame.h; sy++) {
+						const byte *srcRow = srcPx + ((sy / S) * frame->pitch);
+						byte *dstRow = dstPx + (sy * hdFrame.pitch);
+						for (int sx = 0; sx < hdFrame.w; sx++) {
+							dstRow[sx] = srcRow[sx / S];
+						}
+					}
+					// Push solid 2x frame to HD buffer. This overwrites old black pixels!
+					getScreen()->copyToBackBuffer((const byte *)hdFrame.getPixels(), hdFrame.pitch, x * S, y * S, hdFrame.w, hdFrame.h, false, true);
+					hdFrame.free();
+				}
+				// ------------------------------------------
 			}
 
 			if (showSubtitles) {
