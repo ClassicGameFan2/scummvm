@@ -548,25 +548,29 @@ void Screen::bltFast(int16 dX, int16 dY, GraphicFrame *frame, Common::Rect *sour
 	else _backBuffer.copyRectToSurface(frame->surface, dX, dY, *source);
 }
 
-void Screen::copyToBackBuffer(const byte *buffer, int32 pitch, int16 x, int16 y, uint16 width, uint16 height, bool mirrored) {
+void Screen::copyToBackBuffer(const byte *buffer, int32 pitch, int16 x, int16 y, uint16 width, uint16 height, bool mirrored, bool isHD) {
 	if (!buffer || width == 0 || height == 0) return;
 
 	if (!mirrored) {
-		_backBuffer.copyRectToSurface(buffer, pitch, x, y, width, height);
-		
-		int S = ASYLUM_SCALE_FACTOR;
-		// DIRTY RECT UPSCALE: If the engine is writing directly to the 1x buffer (like Video Frames), 
-		// instantly push a scaled copy to the HD buffer so we don't have to scan the whole screen.
-		if (S > 1 && _backBuffer.w == LOGICAL_WIDTH) {
-			byte *hdDest = (byte *)_hdBackBuffer.getPixels();
-			for (int sy = 0; sy < height; sy++) {
-				const byte *srcRow = buffer + (sy * pitch);
-				for (int S_y = 0; S_y < S; S_y++) {
-					byte *dstRow = hdDest + (((y + sy) * S + S_y) * _hdBackBuffer.pitch);
-					for (int sx = 0; sx < width; sx++) {
-						byte c = srcRow[sx];
-						for (int S_x = 0; S_x < S; S_x++) {
-							dstRow[(x + sx) * S + S_x] = c;
+		if (isHD) {
+			_hdBackBuffer.copyRectToSurface(buffer, pitch, x, y, width, height);
+		} else {
+			_backBuffer.copyRectToSurface(buffer, pitch, x, y, width, height);
+			
+			int scale = ASYLUM_SCALE_FACTOR;
+			if (scale > 1 && _backBuffer.w == LOGICAL_WIDTH) {
+				byte *hdDest = (byte *)_hdBackBuffer.getPixels();
+				int32 hdPitch = _hdBackBuffer.pitch; // Pre-computed to avoid MSVC C7732 bug
+				
+				for (int sy = 0; sy < height; sy++) {
+					const byte *srcRow = buffer + (sy * pitch);
+					for (int S_y = 0; S_y < scale; S_y++) {
+						byte *dstRow = hdDest + (((y + sy) * scale + S_y) * hdPitch);
+						for (int sx = 0; sx < width; sx++) {
+							byte c = srcRow[sx];
+							for (int S_x = 0; S_x < scale; S_x++) {
+								dstRow[(x + sx) * scale + S_x] = c;
+							}
 						}
 					}
 				}
@@ -577,34 +581,40 @@ void Screen::copyToBackBuffer(const byte *buffer, int32 pitch, int16 x, int16 y,
 	}
 }
 
-void Screen::copyToBackBufferWithTransparency(byte *buffer, int32 pitch, int16 x, int16 y, uint16 width, uint16 height, bool mirrored) {
-	byte *dest = (byte *)_backBuffer.getPixels();
+void Screen::copyToBackBufferWithTransparency(byte *buffer, int32 pitch, int16 x, int16 y, uint16 width, uint16 height, bool mirrored, bool isHD) {
+	byte *dest = (byte *)(isHD ? _hdBackBuffer.getPixels() : _backBuffer.getPixels());
+	int32 dstPitch = isHD ? _hdBackBuffer.pitch : _backBuffer.pitch;
+	
+	// RESTORED DYNAMIC CLIPPING: This guarantees Max and Loading Titles won't get cut off!
+	int32 maxWidth = isHD ? ASYLUM_SCREEN_WIDTH : LOGICAL_WIDTH;
+	int32 maxHeight = isHD ? ASYLUM_SCREEN_HEIGHT : LOGICAL_HEIGHT;
+
 	int32 left = (x < 0) ? -x : 0;
 	int32 top = (y < 0) ? -y : 0;
-	
-	// RESTORED DYNAMIC CLIPPING: Fixes Max vanishing and loading titles disappearing!
-	int32 right = (x + width > _backBuffer.w) ? _backBuffer.w - abs(x) : width;
-	int32 bottom = (y + height > _backBuffer.h) ? _backBuffer.h - abs(y) : height;
+	int32 right = (x + width > maxWidth) ? maxWidth - abs(x) : width;
+	int32 bottom = (y + height > maxHeight) ? maxHeight - abs(y) : height;
 
 	for (int32 curY = top; curY < bottom; curY++) {
 		for (int32 curX = left; curX < right; curX++) {
 			uint32 offset = (uint32)((mirrored ? right - (curX + 1) : curX) + curY * pitch);
-			if (buffer[offset] != 0) dest[x + curX + (y + curY) * _backBuffer.w] = buffer[offset];
+			if (buffer[offset] != 0) {
+				dest[x + curX + (y + curY) * dstPitch] = buffer[offset];
+			}
 		}
 	}
 	
-	// DIRTY RECT UPSCALE: Catch transparent 1x elements
-	int S = ASYLUM_SCALE_FACTOR;
-	if (S > 1 && _backBuffer.w == LOGICAL_WIDTH) {
+	int scale = ASYLUM_SCALE_FACTOR;
+	if (!isHD && scale > 1 && _backBuffer.w == LOGICAL_WIDTH) {
 		byte *hdDest = (byte *)_hdBackBuffer.getPixels();
+		int32 hdPitch = _hdBackBuffer.pitch;
 		for (int32 curY = top; curY < bottom; curY++) {
 			for (int32 curX = left; curX < right; curX++) {
 				uint32 offset = (uint32)((mirrored ? right - (curX + 1) : curX) + curY * pitch);
 				byte c = buffer[offset];
 				if (c != 0) {
-					for (int sy = 0; sy < S; sy++) {
-						for (int sx = 0; sx < S; sx++) {
-							hdDest[(x + curX) * S + sx + ((y + curY) * S + sy) * _hdBackBuffer.pitch] = c;
+					for (int sy = 0; sy < scale; sy++) {
+						for (int sx = 0; sx < scale; sx++) {
+							hdDest[(x + curX) * scale + sx + ((y + curY) * scale + sy) * hdPitch] = c;
 						}
 					}
 				}
