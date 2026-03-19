@@ -582,17 +582,16 @@ void Screen::copyToBackBuffer(const byte *buffer, int32 pitch, int16 x, int16 y,
 }
 
 void Screen::copyToBackBufferWithTransparency(byte *buffer, int32 pitch, int16 x, int16 y, uint16 width, uint16 height, bool mirrored, bool isHD) {
-	byte *dest = (byte *)(isHD ? _hdBackBuffer.getPixels() : _backBuffer.getPixels());
-	int32 dstPitch = isHD ? _hdBackBuffer.pitch : _backBuffer.pitch;
+	Graphics::Surface *targetSurf = isHD ? &_hdBackBuffer : &_backBuffer;
+	byte *dest = (byte *)targetSurf->getPixels();
+	int32 dstPitch = targetSurf->pitch;
 	
-	// RESTORED DYNAMIC CLIPPING: This guarantees Max and Loading Titles won't get cut off!
-	int32 maxWidth = isHD ? ASYLUM_SCREEN_WIDTH : LOGICAL_WIDTH;
-	int32 maxHeight = isHD ? ASYLUM_SCREEN_HEIGHT : LOGICAL_HEIGHT;
-
 	int32 left = (x < 0) ? -x : 0;
 	int32 top = (y < 0) ? -y : 0;
-	int32 right = (x + width > maxWidth) ? maxWidth - abs(x) : width;
-	int32 bottom = (y + height > maxHeight) ? maxHeight - abs(y) : height;
+	
+	// FLAWLESS DYNAMIC CLIPPING: Reads physical surface size. Fixes Max clipping and vanishing titles!
+	int32 right = (x + width > targetSurf->w) ? targetSurf->w - abs(x) : width;
+	int32 bottom = (y + height > targetSurf->h) ? targetSurf->h - abs(y) : height;
 
 	for (int32 curY = top; curY < bottom; curY++) {
 		for (int32 curX = left; curX < right; curX++) {
@@ -604,7 +603,7 @@ void Screen::copyToBackBufferWithTransparency(byte *buffer, int32 pitch, int16 x
 	}
 	
 	int scale = ASYLUM_SCALE_FACTOR;
-	if (!isHD && scale > 1 && _backBuffer.w == LOGICAL_WIDTH) {
+	if (!isHD && scale > 1 && targetSurf->w == LOGICAL_WIDTH) {
 		byte *hdDest = (byte *)_hdBackBuffer.getPixels();
 		int32 hdPitch = _hdBackBuffer.pitch;
 		for (int32 curY = top; curY < bottom; curY++) {
