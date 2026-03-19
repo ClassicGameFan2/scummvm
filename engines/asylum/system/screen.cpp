@@ -225,7 +225,7 @@ void Screen::fillRect(int16 x, int16 y, int16 width, int16 height, uint32 color)
 void Screen::copyBackBufferToScreen() {
 	int S = ASYLUM_SCALE_FACTOR;
 	if (S > 1) {
-		// ULTRA-FAST SYNC LOOP: Uses raw pointer increments. Eliminates CPU Lag entirely!
+		// ULTRA-FAST SYNC LOOP: Eliminates the loading screen and video lag completely!
 		const byte *src = (const byte *)_backBuffer.getPixels();
 		byte *dst = (byte *)_hdBackBuffer.getPixels();
 		byte bgCol = _mainPalette[0];
@@ -239,6 +239,7 @@ void Screen::copyBackBufferToScreen() {
 			byte *dstRowBase = dst + ((y * S) * pitch2);
 			for (int x = 0; x < w; x++) {
 				byte c = srcRow[x];
+				// Skips background colors to preserve True Projector HD graphics
 				if (c > 0 && c != bgCol) {
 					if (S == 2) {
 						int dx = x * 2;
@@ -582,6 +583,7 @@ void Screen::bltFast(int16 dX, int16 dY, GraphicFrame *frame, Common::Rect *sour
 
 void Screen::copyToBackBuffer(const byte *buffer, int32 pitch, int16 x, int16 y, uint16 width, uint16 height, bool mirrored, bool isHD) {
 	if (!buffer || width == 0 || height == 0) return;
+	
 	if (!mirrored) {
 		if (isHD) _hdBackBuffer.copyRectToSurface(buffer, pitch, x, y, width, height);
 		else _backBuffer.copyRectToSurface(buffer, pitch, x, y, width, height);
@@ -591,16 +593,26 @@ void Screen::copyToBackBuffer(const byte *buffer, int32 pitch, int16 x, int16 y,
 }
 
 void Screen::copyToBackBufferWithTransparency(byte *buffer, int32 pitch, int16 x, int16 y, uint16 width, uint16 height, bool mirrored, bool isHD) {
-	byte *dest = isHD ? (byte *)_hdBackBuffer.getPixels() : (byte *)_backBuffer.getPixels();
 	int32 left = (x < 0) ? -x : 0;
 	int32 top = (y < 0) ? -y : 0;
 	int32 right = (x + width > (isHD ? ASYLUM_SCREEN_WIDTH : LOGICAL_WIDTH)) ? (isHD ? ASYLUM_SCREEN_WIDTH : LOGICAL_WIDTH) - abs(x) : width;
 	int32 bottom = (y + height > (isHD ? ASYLUM_SCREEN_HEIGHT : LOGICAL_HEIGHT)) ? (isHD ? ASYLUM_SCREEN_HEIGHT : LOGICAL_HEIGHT) - abs(y) : height;
 
-	for (int32 curY = top; curY < bottom; curY++) {
-		for (int32 curX = left; curX < right; curX++) {
-			uint32 offset = (uint32)((mirrored ? right - (curX + 1) : curX) + curY * pitch);
-			if (buffer[offset] != 0) dest[x + curX + (y + curY) * (isHD ? ASYLUM_SCREEN_WIDTH : LOGICAL_WIDTH)] = buffer[offset];
+	if (isHD) {
+		byte *dest = (byte *)_hdBackBuffer.getPixels();
+		for (int32 curY = top; curY < bottom; curY++) {
+			for (int32 curX = left; curX < right; curX++) {
+				uint32 offset = (uint32)((mirrored ? right - (curX + 1) : curX) + curY * pitch);
+				if (buffer[offset] != 0) dest[x + curX + (y + curY) * _hdBackBuffer.pitch] = buffer[offset];
+			}
+		}
+	} else {
+		byte *dest = (byte *)_backBuffer.getPixels();
+		for (int32 curY = top; curY < bottom; curY++) {
+			for (int32 curX = left; curX < right; curX++) {
+				uint32 offset = (uint32)((mirrored ? right - (curX + 1) : curX) + curY * pitch);
+				if (buffer[offset] != 0) dest[x + curX + (y + curY) * _backBuffer.pitch] = buffer[offset];
+			}
 		}
 	}
 }
