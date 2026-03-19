@@ -572,23 +572,27 @@ void Screen::bltFast(int16 dX, int16 dY, GraphicFrame *frame, Common::Rect *sour
 	else _backBuffer.copyRectToSurface(frame->surface, dX, dY, *source);
 }
 
-void Screen::copyToBackBuffer(const byte *buffer, int32 pitch, int16 x, int16 y, uint16 width, uint16 height, bool mirrored) {
+void Screen::copyToBackBuffer(const byte *buffer, int32 pitch, int16 x, int16 y, uint16 width, uint16 height, bool mirrored, bool isHD) {
 	if (!buffer || width == 0 || height == 0) return;
-	if (!mirrored) _backBuffer.copyRectToSurface(buffer, pitch, x, y, width, height);
-	else error("[Screen::copyToBackBuffer] Mirrored drawing not implemented");
+	if (!mirrored) {
+		if (isHD) _hdBackBuffer.copyRectToSurface(buffer, pitch, x, y, width, height);
+		else _backBuffer.copyRectToSurface(buffer, pitch, x, y, width, height);
+	} else {
+		error("[Screen::copyToBackBuffer] Mirrored drawing not implemented");
+	}
 }
 
-void Screen::copyToBackBufferWithTransparency(byte *buffer, int32 pitch, int16 x, int16 y, uint16 width, uint16 height, bool mirrored) {
-	byte *dest = (byte *)_backBuffer.getPixels();
+void Screen::copyToBackBufferWithTransparency(byte *buffer, int32 pitch, int16 x, int16 y, uint16 width, uint16 height, bool mirrored, bool isHD) {
+	byte *dest = isHD ? (byte *)_hdBackBuffer.getPixels() : (byte *)_backBuffer.getPixels();
 	int32 left = (x < 0) ? -x : 0;
 	int32 top = (y < 0) ? -y : 0;
-	int32 right = (x + width > LOGICAL_WIDTH) ? LOGICAL_WIDTH - abs(x) : width;
-	int32 bottom = (y + height > LOGICAL_HEIGHT) ? LOGICAL_HEIGHT - abs(y) : height;
+	int32 right = (x + width > (isHD ? ASYLUM_SCREEN_WIDTH : LOGICAL_WIDTH)) ? (isHD ? ASYLUM_SCREEN_WIDTH : LOGICAL_WIDTH) - abs(x) : width;
+	int32 bottom = (y + height > (isHD ? ASYLUM_SCREEN_HEIGHT : LOGICAL_HEIGHT)) ? (isHD ? ASYLUM_SCREEN_HEIGHT : LOGICAL_HEIGHT) - abs(y) : height;
 
 	for (int32 curY = top; curY < bottom; curY++) {
 		for (int32 curX = left; curX < right; curX++) {
 			uint32 offset = (uint32)((mirrored ? right - (curX + 1) : curX) + curY * pitch);
-			if (buffer[offset] != 0) dest[x + curX + (y + curY) * LOGICAL_WIDTH] = buffer[offset];
+			if (buffer[offset] != 0) dest[x + curX + (y + curY) * (isHD ? ASYLUM_SCREEN_WIDTH : LOGICAL_WIDTH)] = buffer[offset];
 		}
 	}
 }
