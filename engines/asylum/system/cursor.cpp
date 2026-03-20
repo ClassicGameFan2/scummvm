@@ -29,6 +29,8 @@
 
 namespace Asylum {
 
+extern Graphics::Surface *getHDSurface(uint32 resourceId, uint32 frameIndex);
+
 const uint32 CURSOR_UPDATE_TICKS = 100;
 
 Cursor::Cursor(AsylumEngine *engine) : _vm(engine),
@@ -93,8 +95,20 @@ void Cursor::update() {
 		error("[Cursor::update] Cursor resources not initialized properly!");
 
 	Common::Point hotspot = getHotspot(_currentFrame);
-
 	GraphicFrame *frame = _cursorRes->getFrame(_currentFrame);
+
+	// --- HD CURSOR INTERCEPT ---
+	int scale = ASYLUM_SCALE_FACTOR;
+	if (scale > 1) {
+		Graphics::Surface *hdSurf = getHDSurface(_graphicResourceId, _currentFrame);
+		if (hdSurf && hdSurf->getPixels()) {
+			// Pass the 2x cursor and scaled hotspot to the hardware
+			CursorMan.replaceCursor(*hdSurf, hotspot.x * scale, hotspot.y * scale, 0);
+			return;
+		}
+	}
+	// ---------------------------
+
 	CursorMan.replaceCursor(frame->surface, hotspot.x, hotspot.y, 0);
 }
 
