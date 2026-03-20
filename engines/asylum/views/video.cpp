@@ -41,8 +41,6 @@
 
 namespace Asylum {
 
-extern int ASYLUM_SCALE_FACTOR;
-
 VideoPlayer::VideoPlayer(AsylumEngine *engine, Audio::Mixer *mixer) : _vm(engine),
 	_currentMovie(0), _subtitleIndex(0), _subtitleCounter(0), _previousFont(kResourceNone), _done(false) {
 
@@ -99,20 +97,24 @@ bool VideoPlayer::handleEvent(const AsylumEvent &evt) {
 		}
 
 		if (_subtitleCounter > 0) {
-			getScreen()->fillRect(0, 400, 640, 80, 0);
+			// WIDESCREEN FIX 1: Clear the background across the entire logical width, not just 640.
+			getScreen()->fillRect(0, 400, LOGICAL_WIDTH, 80, 0);
 
 			if (_subtitleIndex >= 0) {
 				char *text = getText()->get(_subtitles[_subtitleIndex].resourceId);
 
-				int16 y = (int16)(10 * (44 - getText()->draw(0, 99, kTextCalculate, Common::Point(10, 400), 20, 620, text)));
+				// WIDESCREEN FIX 2: Dynamically calculate text width so it perfectly centers under the video.
+				int dynamicWidth = LOGICAL_WIDTH - 20;
+
+				int16 y = (int16)(10 * (44 - getText()->draw(0, 99, kTextCalculate, Common::Point(10, 400), 20, dynamicWidth, text)));
 				if (y <= 400)
 					y = 405;
 
-				getText()->draw(0, 99, kTextCenter, Common::Point(10, y), 20, 620, text);
+				getText()->draw(0, 99, kTextCenter, Common::Point(10, y), 20, dynamicWidth, text);
 
 				if (_vm->checkGameVersion("Steam")) {
 					Graphics::Surface *st = getScreen()->getSurface()->convertTo(g_system->getScreenFormat(), _subtitlePalette);
-					g_system->copyRectToScreen((const byte *)st->getBasePtr(0, 400), st->pitch, 0, 400, 640, 80);
+					g_system->copyRectToScreen((const byte *)st->getBasePtr(0, 400), st->pitch, 0, 400, LOGICAL_WIDTH, 80);
 					st->free();
 					delete st;
 				}
