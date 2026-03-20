@@ -97,24 +97,30 @@ bool VideoPlayer::handleEvent(const AsylumEvent &evt) {
 		}
 
 		if (_subtitleCounter > 0) {
-			// WIDESCREEN FIX 1: Clear the background across the entire logical width, not just 640.
-			getScreen()->fillRect(0, 400, LOGICAL_WIDTH, 80, 0);
+			// WIDESCREEN FIX: Calculate the exact offsets used to center the video, 
+			// and apply them to the subtitles so they dock perfectly underneath!
+			int offsetX = (LOGICAL_WIDTH - 640) / 2;
+			int offsetY = (LOGICAL_HEIGHT - 480) / 2;
+
+			getScreen()->fillRect(offsetX, 400 + offsetY, 640, 80, 0);
 
 			if (_subtitleIndex >= 0) {
 				char *text = getText()->get(_subtitles[_subtitleIndex].resourceId);
 
-				// WIDESCREEN FIX 2: Dynamically calculate text width so it perfectly centers under the video.
-				int dynamicWidth = LOGICAL_WIDTH - 20;
+				// The original math returns an absolute Y coordinate based on a 1998 480p screen.
+				int16 y = (int16)(10 * (44 - getText()->draw(0, 99, kTextCalculate, Common::Point(10 + offsetX, 400 + offsetY), 20, 620, text)));
+				
+				// Shift the calculated Y by our viewport offset
+				y += offsetY;
 
-				int16 y = (int16)(10 * (44 - getText()->draw(0, 99, kTextCalculate, Common::Point(10, 400), 20, dynamicWidth, text)));
-				if (y <= 400)
-					y = 405;
+				if (y <= 400 + offsetY)
+					y = 405 + offsetY;
 
-				getText()->draw(0, 99, kTextCenter, Common::Point(10, y), 20, dynamicWidth, text);
+				getText()->draw(0, 99, kTextCenter, Common::Point(10 + offsetX, y), 20, 620, text);
 
 				if (_vm->checkGameVersion("Steam")) {
 					Graphics::Surface *st = getScreen()->getSurface()->convertTo(g_system->getScreenFormat(), _subtitlePalette);
-					g_system->copyRectToScreen((const byte *)st->getBasePtr(0, 400), st->pitch, 0, 400, LOGICAL_WIDTH, 80);
+					g_system->copyRectToScreen((const byte *)st->getBasePtr(offsetX, 400 + offsetY), st->pitch, offsetX, 400 + offsetY, 640, 80);
 					st->free();
 					delete st;
 				}
