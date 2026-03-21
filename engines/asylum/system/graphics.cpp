@@ -172,18 +172,21 @@ void GraphicResource::init(byte *data, int32 size) {
 			_frames[i].surface.create(width, height, Graphics::PixelFormat::createFormatCLUT8());
 			_frames[i].surface.copyRectToSurface(dataPtr, width, 0, 0, width, height);
 
-			// 2. SECRETY BUILD THE HD GRAPHIC IN THE VAULT
-			if (scaleFactor > 1) {
+			// 2. SECRETLY BUILD HD GRAPHIC IN VAULT
+			bool doReplace = ConfMan.hasKey("Asset_HD_Replace") ? ConfMan.getInt("Asset_HD_Replace") != 0 : false;
+			
+			if (scaleFactor >= 1 || doReplace) {
 				uint32 key = (_resourceId << 8) | (i & 0xFF);
 				
 				if (!g_hdSurfaces.contains(key)) {
 					bool replaced = false;
+					int expectedW = width * scaleFactor;
+					int expectedH = height * scaleFactor;
 
 					// Check for Waifu2x HD Replacement
 					if (doReplace) {
 						Common::String hdName = Common::String::format("SanitariumHDPack/RES%03d/obj_%u_f%d.png", packId, _resourceId, i);
-						Common::Path hdPath(hdName);
-						Common::FSNode hdNode(hdPath);
+						Common::FSNode hdNode(Common::Path(hdName));
 						
 						if (hdNode.exists()) {
 							Common::File f;
@@ -191,11 +194,28 @@ void GraphicResource::init(byte *data, int32 size) {
 								Image::PNGDecoder decoder;
 								if (decoder.loadStream(f)) {
 									const Graphics::Surface *decSurf = decoder.getSurface();
-									// Ensure it is 8-bit to match engine capabilities
 									if (decSurf->format.bytesPerPixel == 1) { 
 										Graphics::Surface *hdSurf = new Graphics::Surface();
-										hdSurf->create(decSurf->w, decSurf->h, Graphics::PixelFormat::createFormatCLUT8());
-										hdSurf->copyFrom(*decSurf);
+										hdSurf->create(expectedW, expectedH, Graphics::PixelFormat::createFormatCLUT8());
+										
+										// SAFELY SCALE THE LOADED PNG TO MATCH EXPECTED BOUNDS (PREVENTS CRASHES)
+										const byte *srcPx = (const byte *)decSurf->getPixels();
+										byte *dstPx = (byte *)hdSurf->getPixels();
+										float scaleX = (float)decSurf->w / expectedW;
+										float scaleY = (float)decSurf->h / expectedH;
+										
+										for (int sy = 0; sy < expectedH; sy++) {
+											int srcY = (int)(sy * scaleY);
+											if (srcY >= decSurf->h) srcY = decSurf->h - 1;
+											const byte *srcRow = srcPx + (srcY * decSurf->pitch);
+											byte *dstRow = dstPx + (sy * hdSurf->pitch);
+											for (int sx = 0; sx < expectedW; sx++) {
+												int srcX = (int)(sx * scaleX);
+												if (srcX >= decSurf->w) srcX = decSurf->w - 1;
+												dstRow[sx] = srcRow[srcX];
+											}
+										}
+										
 										g_hdSurfaces[key] = hdSurf;
 										replaced = true;
 									} else {
@@ -207,18 +227,15 @@ void GraphicResource::init(byte *data, int32 size) {
 					}
 
 					// Nearest-Neighbor Fallback
-					if (!replaced) {
+					if (!replaced && scaleFactor > 1) {
 						Graphics::Surface *hdSurf = new Graphics::Surface();
-						hdSurf->create(width * scaleFactor, height * scaleFactor, Graphics::PixelFormat::createFormatCLUT8());
-
+						hdSurf->create(expectedW, expectedH, Graphics::PixelFormat::createFormatCLUT8());
 						const byte *srcPx = (const byte *)_frames[i].surface.getPixels();
 						byte *dstPx = (byte *)hdSurf->getPixels();
-
-						// Mathematically flawless point-scaling
-						for (int sy = 0; sy < height * scaleFactor; sy++) {
+						for (int sy = 0; sy < expectedH; sy++) {
 							const byte *srcRow = srcPx + ((sy / scaleFactor) * _frames[i].surface.pitch);
 							byte *dstRow = dstPx + (sy * hdSurf->pitch);
-							for (int sx = 0; sx < width * scaleFactor; sx++) {
+							for (int sx = 0; sx < expectedW; sx++) {
 								dstRow[sx] = srcRow[sx / scaleFactor];
 							}
 						}
