@@ -134,25 +134,25 @@ void GraphicResource::init(byte *data, int32 size) {
 	// SMART RAM CLEANER
 	// Pack 0 contains Shared UI and Cursors. We must protect them from being deleted!
 	// We also ensure opening a menu (Pack 0) doesn't delete the active Chapter's HD graphics.
-	if (packId != 0 && packId != g_lastPackId && g_lastPackId != 0xFFFFFFFF && g_lastPackId != 0) {
-		Common::Array<uint32> keysToDelete;
-		for (auto &it : g_hdSurfaces) {
-			// Extract the packId from our Dictionary key: (resourceId << 8) | frameIndex
-			uint32 itemPackId = (it._key >> 24) & 0xFF; 
-			if (itemPackId != 0) { // Only delete chapter assets, preserve Pack 0
-				if (it._value) { it._value->free(); delete it._value; }
-				keysToDelete.push_back(it._key);
-			}
-		}
-		for (uint i = 0; i < keysToDelete.size(); i++) {
-			g_hdSurfaces.erase(keysToDelete[i]);
-		}
-	}
-	
-	// Only update the last pack tracker if it's a real chapter pack
-	if (packId != 0) {
-		g_lastPackId = packId;
-	}
+//	if (packId != 0 && packId != g_lastPackId && g_lastPackId != 0xFFFFFFFF && g_lastPackId != 0) {
+//		Common::Array<uint32> keysToDelete;
+//		for (auto &it : g_hdSurfaces) {
+//			// Extract the packId from our Dictionary key: (resourceId << 8) | frameIndex
+//			uint32 itemPackId = (it._key >> 24) & 0xFF; 
+//			if (itemPackId != 0) { // Only delete chapter assets, preserve Pack 0
+//				if (it._value) { it._value->free(); delete it._value; }
+//				keysToDelete.push_back(it._key);
+//			}
+//		}
+//		for (uint i = 0; i < keysToDelete.size(); i++) {
+//			g_hdSurfaces.erase(keysToDelete[i]);
+//		}
+//	}
+//	
+//	// Only update the last pack tracker if it's a real chapter pack
+//	if (packId != 0) {
+//		g_lastPackId = packId;
+//	}
 	// ------------------------
 
 	dataPtr = data;
