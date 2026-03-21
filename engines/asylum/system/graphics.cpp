@@ -131,17 +131,28 @@ void GraphicResource::init(byte *data, int32 size) {
 	bool doReplace = ConfMan.hasKey("Asset_HD_Replace") ? ConfMan.getInt("Asset_HD_Replace") != 0 : false;
 	uint32 packId = (_resourceId >> 16) & 0xFF;
 
-	// SMART RAM CLEANER: If we load a new chapter, empty the HD Vault so RAM doesn't overflow!
-	if (packId != g_lastPackId && g_lastPackId != 0xFFFFFFFF) {
+	// SMART RAM CLEANER
+	// Pack 0 contains Shared UI and Cursors. We must protect them from being deleted!
+	// We also ensure opening a menu (Pack 0) doesn't delete the active Chapter's HD graphics.
+	if (packId != 0 && packId != g_lastPackId && g_lastPackId != 0xFFFFFFFF && g_lastPackId != 0) {
+		Common::Array<uint32> keysToDelete;
 		for (auto &it : g_hdSurfaces) {
-			if (it._value) {
-				it._value->free();
-				delete it._value;
+			// Extract the packId from our Dictionary key: (resourceId << 8) | frameIndex
+			uint32 itemPackId = (it._key >> 24) & 0xFF; 
+			if (itemPackId != 0) { // Only delete chapter assets, preserve Pack 0
+				if (it._value) { it._value->free(); delete it._value; }
+				keysToDelete.push_back(it._key);
 			}
 		}
-		g_hdSurfaces.clear();
+		for (uint i = 0; i < keysToDelete.size(); i++) {
+			g_hdSurfaces.erase(keysToDelete[i]);
+		}
 	}
-	g_lastPackId = packId;
+	
+	// Only update the last pack tracker if it's a real chapter pack
+	if (packId != 0) {
+		g_lastPackId = packId;
+	}
 	// ------------------------
 
 	dataPtr = data;
