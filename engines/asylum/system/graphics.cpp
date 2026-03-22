@@ -167,83 +167,100 @@ void GraphicResource::init(byte *data, int32 size) {
 		uint16 width  = READ_LE_UINT16(dataPtr); dataPtr += 2;
 
 		if (width > 0 && height > 0) {
-			// 1. CREATE THE 1X GRAPHIC (The Game Brain uses this!)
-			// This perfectly preserves hitboxes, inventory clicks, and physics boundaries!
-			_frames[i].surface.create(width, height, Graphics::PixelFormat::createFormatCLUT8());
-			_frames[i].surface.copyRectToSurface(dataPtr, width, 0, 0, width, height);
-
-			// 2. SECRETLY BUILD HD GRAPHIC IN VAULT
-			if (scaleFactor >= 1 || doReplace) {
-				uint32 key = (_resourceId << 8) | (i & 0xFF);
+			// 1. DETERMINE BASE SOURCE
+			Graphics::Surface baseSurf;
+			bool customLoaded = false;
+			
+			if (doReplace) {
+				Common::String hdName = Common::String::format("SanitariumHDPack/RES%03d/obj_%u_f%d.png", packId, _resourceId, i);
+				Common::Path hdPath(hdName);
+				Common::FSNode hdNode(hdPath);
 				
-				if (!g_hdSurfaces.contains(key)) {
-					bool replaced = false;
-					int expectedW = width * scaleFactor;
-					int expectedH = height * scaleFactor;
-
-					// Check for Waifu2x HD Replacement
-					if (doReplace) {
-						Common::String hdName = Common::String::format("SanitariumHDPack/RES%03d/obj_%u_f%d.png", packId, _resourceId, i);
-						
-						// Splitting this into two lines fixes the C++ "Most Vexing Parse" error
-						Common::Path hdPath(hdName);
-						Common::FSNode hdNode(hdPath);
-						
-						if (hdNode.exists()) {
-							Common::File f;
-							if (f.open(hdNode)) {
-								Image::PNGDecoder decoder;
-								if (decoder.loadStream(f)) {
-									const Graphics::Surface *decSurf = decoder.getSurface();
-									if (decSurf->format.bytesPerPixel == 1) { 
-										Graphics::Surface *hdSurf = new Graphics::Surface();
-										hdSurf->create(expectedW, expectedH, Graphics::PixelFormat::createFormatCLUT8());
-										
-										// SAFELY SCALE THE LOADED PNG TO MATCH EXPECTED BOUNDS (PREVENTS CRASHES)
-										const byte *srcPx = (const byte *)decSurf->getPixels();
-										byte *dstPx = (byte *)hdSurf->getPixels();
-										float scaleX = (float)decSurf->w / expectedW;
-										float scaleY = (float)decSurf->h / expectedH;
-										
-										for (int sy = 0; sy < expectedH; sy++) {
-											int srcY = (int)(sy * scaleY);
-											if (srcY >= decSurf->h) srcY = decSurf->h - 1;
-											const byte *srcRow = srcPx + (srcY * decSurf->pitch);
-											byte *dstRow = dstPx + (sy * hdSurf->pitch);
-											for (int sx = 0; sx < expectedW; sx++) {
-												int srcX = (int)(sx * scaleX);
-												if (srcX >= decSurf->w) srcX = decSurf->w - 1;
-												dstRow[sx] = srcRow[srcX];
-											}
-										}
-										
-										g_hdSurfaces[key] = hdSurf;
-										replaced = true;
-									} else {
-										warning("[HD INJECTOR] Failed: %s is not an 8-bit Indexed PNG!", hdName.c_str());
-									}
-								}
+				if (hdNode.exists()) {
+					Common::File f;
+					if (f.open(hdNode)) {
+						Image::PNGDecoder decoder;
+						if (decoder.loadStream(f)) {
+							const Graphics::Surface *decSurf = decoder.getSurface();
+							if (decSurf->format.bytesPerPixel == 1) { 
+								baseSurf.create(decSurf->w, decSurf->h, Graphics::PixelFormat::createFormatCLUT8());
+								baseSurf.copyFrom(*decSurf);
+								customLoaded = true;
+							} else {
+								warning("[HD INJECTOR] Failed: %s is not an 8-bit Indexed PNG!", hdName.c_str());
 							}
 						}
-					}
-
-					// Nearest-Neighbor Fallback
-					if (!replaced && scaleFactor > 1) {
-						Graphics::Surface *hdSurf = new Graphics::Surface();
-						hdSurf->create(expectedW, expectedH, Graphics::PixelFormat::createFormatCLUT8());
-						const byte *srcPx = (const byte *)_frames[i].surface.getPixels();
-						byte *dstPx = (byte *)hdSurf->getPixels();
-						for (int sy = 0; sy < expectedH; sy++) {
-							const byte *srcRow = srcPx + ((sy / scaleFactor) * _frames[i].surface.pitch);
-							byte *dstRow = dstPx + (sy * hdSurf->pitch);
-							for (int sx = 0; sx < expectedW; sx++) {
-								dstRow[sx] = srcRow[sx / scaleFactor];
-							}
-						}
-						g_hdSurfaces[key] = hdSurf;
 					}
 				}
 			}
+
+			if (!customLoaded) {
+				baseSurf.create(width, height, Graphics::PixelFormat::createFormatCLUT8());
+				baseSurf.copyRectToSurface(dataPtr, width, 0, 0, width, height);
+			}
+
+			// 2. ASSIGN TO 1X GAME BRAIN
+			_frames[i].surface.create(width, height, Graphics::PixelFormat::createFormatCLUT8());
+			
+			if (baseSurf.w == width && baseSurf.h == height) {
+				_frames[i].surface.copyFrom(baseSurf);
+			} else {
+				// If a custom PNG is larger/smaller, safely downscale it to 1x for collision math!
+				const byte *srcPx = (const byte *)baseSurf.getPixels();
+				byte *dstPx = (byte *)_frames[i].surface.getPixels();
+				float sX = (float)baseSurf.w / width;
+				float sY = (float)baseSurf.h / height;
+				
+				for (int sy = 0; sy < height; sy++) {
+					int srcY = (int)(sy * sY);
+					if (srcY >= baseSurf.h) srcY = baseSurf.h - 1;
+					const byte *srcRow = srcPx + (srcY * baseSurf.pitch);
+					byte *dstRow = dstPx + (sy * _frames[i].surface.pitch);
+					for (int sx = 0; sx < width; sx++) {
+						int srcX = (int)(sx * sX);
+						if (srcX >= baseSurf.w) srcX = baseSurf.w - 1;
+						dstRow[sx] = srcRow[srcX];
+					}
+				}
+			}
+
+			// 3. BUILD THE HD VAULT (Only if playing at 2x, 3x, etc.)
+			if (scaleFactor > 1) {
+				uint32 key = (_resourceId << 8) | (i & 0xFF);
+				
+				if (!g_hdSurfaces.contains(key)) {
+					int expectedW = width * scaleFactor;
+					int expectedH = height * scaleFactor;
+					
+					Graphics::Surface *hdSurf = new Graphics::Surface();
+					hdSurf->create(expectedW, expectedH, Graphics::PixelFormat::createFormatCLUT8());
+					
+					if (baseSurf.w == expectedW && baseSurf.h == expectedH) {
+						hdSurf->copyFrom(baseSurf);
+					} else {
+						// Scale the base surface (Original or Custom PNG) to the target screen resolution
+						const byte *srcPx = (const byte *)baseSurf.getPixels();
+						byte *dstPx = (byte *)hdSurf->getPixels();
+						float sX = (float)baseSurf.w / expectedW;
+						float sY = (float)baseSurf.h / expectedH;
+						
+						for (int sy = 0; sy < expectedH; sy++) {
+							int srcY = (int)(sy * sY);
+							if (srcY >= baseSurf.h) srcY = baseSurf.h - 1;
+							const byte *srcRow = srcPx + (srcY * baseSurf.pitch);
+							byte *dstRow = dstPx + (sy * hdSurf->pitch);
+							for (int sx = 0; sx < expectedW; sx++) {
+								int srcX = (int)(sx * sX);
+								if (srcX >= baseSurf.w) srcX = baseSurf.w - 1;
+								dstRow[sx] = srcRow[srcX];
+							}
+						}
+					}
+					g_hdSurfaces[key] = hdSurf;
+				}
+			}
+			
+			baseSurf.free();
 		}
 	}
 }
