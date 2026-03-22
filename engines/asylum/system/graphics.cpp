@@ -173,8 +173,6 @@ void GraphicResource::init(byte *data, int32 size) {
 			_frames[i].surface.copyRectToSurface(dataPtr, width, 0, 0, width, height);
 
 			// 2. SECRETLY BUILD HD GRAPHIC IN VAULT
-			bool doReplace = ConfMan.hasKey("Asset_HD_Replace") ? ConfMan.getInt("Asset_HD_Replace") != 0 : false;
-			
 			if (scaleFactor >= 1 || doReplace) {
 				uint32 key = (_resourceId << 8) | (i & 0xFF);
 				
