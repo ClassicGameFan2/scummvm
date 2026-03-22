@@ -39,7 +39,6 @@ namespace Asylum {
 // --- GLOBAL HD DICTIONARY (THE VAULT) ---
 // This vault is completely hidden from the 1x Game Brain!
 static Common::HashMap<uint32, Graphics::Surface *> g_hdSurfaces;
-static uint32 g_lastPackId = 0xFFFFFFFF;
 
 Graphics::Surface *getHDSurface(uint32 resourceId, uint32 frameIndex) {
 	uint32 key = (resourceId << 8) | (frameIndex & 0xFF);
@@ -131,29 +130,16 @@ void GraphicResource::init(byte *data, int32 size) {
 	bool doReplace = ConfMan.hasKey("Asset_HD_Replace") ? ConfMan.getInt("Asset_HD_Replace") != 0 : false;
 	uint32 packId = (_resourceId >> 16) & 0xFF;
 
-	// SMART RAM CLEANER
-	// Pack 0 contains Shared UI and Cursors. We must protect them from being deleted!
-	// We also ensure opening a menu (Pack 0) doesn't delete the active Chapter's HD graphics.
-//	if (packId != 0 && packId != g_lastPackId && g_lastPackId != 0xFFFFFFFF && g_lastPackId != 0) {
-//		Common::Array<uint32> keysToDelete;
-//		for (auto &it : g_hdSurfaces) {
-//			// Extract the packId from our Dictionary key: (resourceId << 8) | frameIndex
-//			uint32 itemPackId = (it._key >> 24) & 0xFF; 
-//			if (itemPackId != 0) { // Only delete chapter assets, preserve Pack 0
-//				if (it._value) { it._value->free(); delete it._value; }
-//				keysToDelete.push_back(it._key);
-//			}
-//		}
-//		for (uint i = 0; i < keysToDelete.size(); i++) {
-//			g_hdSurfaces.erase(keysToDelete[i]);
-//		}
-//	}
-//	
-//	// Only update the last pack tracker if it's a real chapter pack
-//	if (packId != 0) {
-//		g_lastPackId = packId;
-//	}
-	// ------------------------
+	// SMART I/O OPTIMIZER: Only check the hard drive if we know this object has modded frames!
+	// This prevents the engine from scanning the HDD 2000+ times when a menu opens, killing the lag completely.
+	bool isModdedObject = false;
+	if (doReplace) {
+		Common::String checkName = Common::String::format("SanitariumHDPack/RES%03d/obj_%u_f0.png", packId, _resourceId);
+		Common::Path checkPath(checkName);
+		if (Common::FSNode(checkPath).exists()) {
+			isModdedObject = true;
+		}
+	}
 
 	dataPtr = data;
 
@@ -167,100 +153,90 @@ void GraphicResource::init(byte *data, int32 size) {
 		uint16 width  = READ_LE_UINT16(dataPtr); dataPtr += 2;
 
 		if (width > 0 && height > 0) {
-			// 1. DETERMINE BASE SOURCE
-			Graphics::Surface baseSurf;
-			bool customLoaded = false;
 			
-			if (doReplace) {
-				Common::String hdName = Common::String::format("SanitariumHDPack/RES%03d/obj_%u_f%d.png", packId, _resourceId, i);
-				Common::Path hdPath(hdName);
-				Common::FSNode hdNode(hdPath);
-				
-				if (hdNode.exists()) {
-					Common::File f;
-					if (f.open(hdNode)) {
-						Image::PNGDecoder decoder;
-						if (decoder.loadStream(f)) {
-							const Graphics::Surface *decSurf = decoder.getSurface();
-							if (decSurf->format.bytesPerPixel == 1) { 
-								baseSurf.create(decSurf->w, decSurf->h, Graphics::PixelFormat::createFormatCLUT8());
-								baseSurf.copyFrom(*decSurf);
-								customLoaded = true;
-							} else {
-								warning("[HD INJECTOR] Failed: %s is not an 8-bit Indexed PNG!", hdName.c_str());
-							}
-						}
-					}
-				}
-			}
-
-			if (!customLoaded) {
-				baseSurf.create(width, height, Graphics::PixelFormat::createFormatCLUT8());
-				baseSurf.copyRectToSurface(dataPtr, width, 0, 0, width, height);
-			}
-
-			// 2. ASSIGN TO 1X GAME BRAIN
+			// 1. ALWAYS GIVE THE 1X GAME BRAIN THE ORIGINAL VANILLA DATA
+			// This guarantees perfect pixel collision for Max, even if you are playing at 4x with Waifu PNGs!
 			_frames[i].surface.create(width, height, Graphics::PixelFormat::createFormatCLUT8());
-			
-			if (baseSurf.w == width && baseSurf.h == height) {
-				_frames[i].surface.copyFrom(baseSurf);
-			} else {
-				// If a custom PNG is larger/smaller, safely downscale it to 1x for collision math!
-				const byte *srcPx = (const byte *)baseSurf.getPixels();
-				byte *dstPx = (byte *)_frames[i].surface.getPixels();
-				float sX = (float)baseSurf.w / width;
-				float sY = (float)baseSurf.h / height;
-				
-				for (int sy = 0; sy < height; sy++) {
-					int srcY = (int)(sy * sY);
-					if (srcY >= baseSurf.h) srcY = baseSurf.h - 1;
-					const byte *srcRow = srcPx + (srcY * baseSurf.pitch);
-					byte *dstRow = dstPx + (sy * _frames[i].surface.pitch);
-					for (int sx = 0; sx < width; sx++) {
-						int srcX = (int)(sx * sX);
-						if (srcX >= baseSurf.w) srcX = baseSurf.w - 1;
-						dstRow[sx] = srcRow[srcX];
-					}
-				}
-			}
+			_frames[i].surface.copyRectToSurface(dataPtr, width, 0, 0, width, height);
 
-			// 3. BUILD THE HD VAULT (Only if playing at 2x, 3x, etc.)
-			if (scaleFactor > 1) {
+			// 2. HANDLE HD REPLACEMENT & VAULT BUILDING
+			if (scaleFactor > 1 || doReplace) {
 				uint32 key = (_resourceId << 8) | (i & 0xFF);
 				
 				if (!g_hdSurfaces.contains(key)) {
+					bool replaced = false;
 					int expectedW = width * scaleFactor;
 					int expectedH = height * scaleFactor;
-					
-					Graphics::Surface *hdSurf = new Graphics::Surface();
-					hdSurf->create(expectedW, expectedH, Graphics::PixelFormat::createFormatCLUT8());
-					
-					if (baseSurf.w == expectedW && baseSurf.h == expectedH) {
-						hdSurf->copyFrom(baseSurf);
-					} else {
-						// Scale the base surface (Original or Custom PNG) to the target screen resolution
-						const byte *srcPx = (const byte *)baseSurf.getPixels();
-						byte *dstPx = (byte *)hdSurf->getPixels();
-						float sX = (float)baseSurf.w / expectedW;
-						float sY = (float)baseSurf.h / expectedH;
+
+					// Check for Waifu2x HD Replacement
+					if (isModdedObject) {
+						Common::String hdName = Common::String::format("SanitariumHDPack/RES%03d/obj_%u_f%d.png", packId, _resourceId, i);
+						Common::Path hdPath(hdName);
+						Common::FSNode hdNode(hdPath);
 						
-						for (int sy = 0; sy < expectedH; sy++) {
-							int srcY = (int)(sy * sY);
-							if (srcY >= baseSurf.h) srcY = baseSurf.h - 1;
-							const byte *srcRow = srcPx + (srcY * baseSurf.pitch);
-							byte *dstRow = dstPx + (sy * hdSurf->pitch);
-							for (int sx = 0; sx < expectedW; sx++) {
-								int srcX = (int)(sx * sX);
-								if (srcX >= baseSurf.w) srcX = baseSurf.w - 1;
-								dstRow[sx] = srcRow[srcX];
+						if (hdNode.exists()) {
+							Common::File f;
+							if (f.open(hdNode)) {
+								Image::PNGDecoder decoder;
+								if (decoder.loadStream(f)) {
+									const Graphics::Surface *decSurf = decoder.getSurface();
+									if (decSurf->format.bytesPerPixel == 1) { 
+										
+										// If playing at 1x, replace the Game Brain's vanilla surface with the 1x Mod
+										if (scaleFactor == 1) {
+											if (decSurf->w == width && decSurf->h == height) {
+												_frames[i].surface.copyFrom(*decSurf);
+											}
+											replaced = true;
+										} 
+										// If playing at 2x+, put the PNG strictly in the HD Vault! (Game Brain stays vanilla)
+										else {
+											Graphics::Surface *hdSurf = new Graphics::Surface();
+											hdSurf->create(expectedW, expectedH, Graphics::PixelFormat::createFormatCLUT8());
+											
+											// Safely scale loaded PNG to expected bounds to prevent crashes
+											const byte *srcPx = (const byte *)decSurf->getPixels();
+											byte *dstPx = (byte *)hdSurf->getPixels();
+											float sX = (float)decSurf->w / expectedW;
+											float sY = (float)decSurf->h / expectedH;
+											
+											for (int sy = 0; sy < expectedH; sy++) {
+												int srcY = (int)(sy * sY);
+												if (srcY >= decSurf->h) srcY = decSurf->h - 1;
+												const byte *srcRow = srcPx + (srcY * decSurf->pitch);
+												byte *dstRow = dstPx + (sy * hdSurf->pitch);
+												for (int sx = 0; sx < expectedW; sx++) {
+													int srcX = (int)(sx * sX);
+													if (srcX >= decSurf->w) srcX = decSurf->w - 1;
+													dstRow[sx] = srcRow[srcX];
+												}
+											}
+											g_hdSurfaces[key] = hdSurf;
+											replaced = true;
+										}
+									}
+								}
 							}
 						}
 					}
-					g_hdSurfaces[key] = hdSurf;
+
+					// Nearest-Neighbor Fallback
+					if (!replaced && scaleFactor > 1) {
+						Graphics::Surface *hdSurf = new Graphics::Surface();
+						hdSurf->create(expectedW, expectedH, Graphics::PixelFormat::createFormatCLUT8());
+						const byte *srcPx = (const byte *)_frames[i].surface.getPixels();
+						byte *dstPx = (byte *)hdSurf->getPixels();
+						for (int sy = 0; sy < expectedH; sy++) {
+							const byte *srcRow = srcPx + ((sy / scaleFactor) * _frames[i].surface.pitch);
+							byte *dstRow = dstPx + (sy * hdSurf->pitch);
+							for (int sx = 0; sx < expectedW; sx++) {
+								dstRow[sx] = srcRow[sx / scaleFactor];
+							}
+						}
+						g_hdSurfaces[key] = hdSurf;
+					}
 				}
 			}
-			
-			baseSurf.free();
 		}
 	}
 }
