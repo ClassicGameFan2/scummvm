@@ -154,87 +154,93 @@ void GraphicResource::init(byte *data, int32 size) {
 
 		if (width > 0 && height > 0) {
 			
-			// 1. ALWAYS GIVE THE 1X GAME BRAIN THE ORIGINAL VANILLA DATA
-			// This guarantees perfect pixel collision for Max, even if you are playing at 4x with Waifu PNGs!
+			// 1. ALWAYS GIVE THE 1X GAME BRAIN THE VANILLA DATA FOR PERFECT HITBOXES
 			_frames[i].surface.create(width, height, Graphics::PixelFormat::createFormatCLUT8());
 			_frames[i].surface.copyRectToSurface(dataPtr, width, 0, 0, width, height);
 
-			// 2. HANDLE HD REPLACEMENT & VAULT BUILDING
-			if (scaleFactor > 1 || doReplace) {
-				uint32 key = (_resourceId << 8) | (i & 0xFF);
-				
-				if (!g_hdSurfaces.contains(key)) {
-					bool replaced = false;
-					int expectedW = width * scaleFactor;
-					int expectedH = height * scaleFactor;
+			// 2. CHECK CACHE AND BUILD VAULT (Executes exactly ONCE per frame key!)
+			uint32 key = (_resourceId << 8) | (i & 0xFF);
+			
+			if (!g_hdSurfaces.contains(key)) {
+				bool replaced = false;
+				int expectedW = width * scaleFactor;
+				int expectedH = height * scaleFactor;
 
-					// Check for Waifu2x HD Replacement
-					if (isModdedObject) {
-						Common::String hdName = Common::String::format("SanitariumHDPack/RES%03d/obj_%u_f%d.png", packId, _resourceId, i);
-						Common::Path hdPath(hdName);
-						Common::FSNode hdNode(hdPath);
-						
-						if (hdNode.exists()) {
-							Common::File f;
-							if (f.open(hdNode)) {
-								Image::PNGDecoder decoder;
-								if (decoder.loadStream(f)) {
-									const Graphics::Surface *decSurf = decoder.getSurface();
-									if (decSurf->format.bytesPerPixel == 1) { 
-										
-										// If playing at 1x, replace the Game Brain's vanilla surface with the 1x Mod
-										if (scaleFactor == 1) {
-											if (decSurf->w == width && decSurf->h == height) {
-												_frames[i].surface.copyFrom(*decSurf);
-											}
-											replaced = true;
-										} 
-										// If playing at 2x+, put the PNG strictly in the HD Vault! (Game Brain stays vanilla)
-										else {
-											Graphics::Surface *hdSurf = new Graphics::Surface();
-											hdSurf->create(expectedW, expectedH, Graphics::PixelFormat::createFormatCLUT8());
-											
-											// Safely scale loaded PNG to expected bounds to prevent crashes
-											const byte *srcPx = (const byte *)decSurf->getPixels();
-											byte *dstPx = (byte *)hdSurf->getPixels();
-											float sX = (float)decSurf->w / expectedW;
-											float sY = (float)decSurf->h / expectedH;
-											
-											for (int sy = 0; sy < expectedH; sy++) {
-												int srcY = (int)(sy * sY);
-												if (srcY >= decSurf->h) srcY = decSurf->h - 1;
-												const byte *srcRow = srcPx + (srcY * decSurf->pitch);
-												byte *dstRow = dstPx + (sy * hdSurf->pitch);
-												for (int sx = 0; sx < expectedW; sx++) {
-													int srcX = (int)(sx * sX);
-													if (srcX >= decSurf->w) srcX = decSurf->w - 1;
-													dstRow[sx] = srcRow[srcX];
-												}
-											}
-											g_hdSurfaces[key] = hdSurf;
-											replaced = true;
+				Graphics::Surface *hdSurf = nullptr;
+
+				// Only check Hard Drive if replacement is turned on
+				if (doReplace) {
+					Common::String hdName = Common::String::format("SanitariumHDPack/RES%03d/obj_%u_f%d.png", packId, _resourceId, i);
+					Common::Path hdPath(hdName);
+					Common::FSNode hdNode(hdPath);
+					
+					if (hdNode.exists()) {
+						Common::File f;
+						if (f.open(hdNode)) {
+							Image::PNGDecoder decoder;
+							if (decoder.loadStream(f)) {
+								const Graphics::Surface *decSurf = decoder.getSurface();
+								if (decSurf->format.bytesPerPixel == 1) { 
+									hdSurf = new Graphics::Surface();
+									hdSurf->create(expectedW, expectedH, Graphics::PixelFormat::createFormatCLUT8());
+									
+									// Safely scale loaded PNG to expected bounds to prevent engine crashes
+									const byte *srcPx = (const byte *)decSurf->getPixels();
+									byte *dstPx = (byte *)hdSurf->getPixels();
+									float sX = (float)decSurf->w / expectedW;
+									float sY = (float)decSurf->h / expectedH;
+									
+									for (int sy = 0; sy < expectedH; sy++) {
+										int srcY = (int)(sy * sY);
+										if (srcY >= decSurf->h) srcY = decSurf->h - 1;
+										const byte *srcRow = srcPx + (srcY * decSurf->pitch);
+										byte *dstRow = dstPx + (sy * hdSurf->pitch);
+										for (int sx = 0; sx < expectedW; sx++) {
+											int srcX = (int)(sx * sX);
+											if (srcX >= decSurf->w) srcX = decSurf->w - 1;
+											dstRow[sx] = srcRow[srcX];
 										}
 									}
+									replaced = true;
+
+									// Print Debug Message exactly once!
+									if (ConfMan.hasKey("HDDebugMessages") && ConfMan.getInt("HDDebugMessages") != 0) {
+										warning("[HD INJECTOR] Successfully loaded custom PNG: %s", hdName.c_str());
+									}
+								} else {
+									warning("[HD INJECTOR] Failed: %s is not an 8-bit Indexed PNG!", hdName.c_str());
 								}
 							}
 						}
 					}
+				}
 
-					// Nearest-Neighbor Fallback
-					if (!replaced && scaleFactor > 1) {
-						Graphics::Surface *hdSurf = new Graphics::Surface();
-						hdSurf->create(expectedW, expectedH, Graphics::PixelFormat::createFormatCLUT8());
-						const byte *srcPx = (const byte *)_frames[i].surface.getPixels();
-						byte *dstPx = (byte *)hdSurf->getPixels();
-						for (int sy = 0; sy < expectedH; sy++) {
-							const byte *srcRow = srcPx + ((sy / scaleFactor) * _frames[i].surface.pitch);
-							byte *dstRow = dstPx + (sy * hdSurf->pitch);
-							for (int sx = 0; sx < expectedW; sx++) {
-								dstRow[sx] = srcRow[sx / scaleFactor];
-							}
+				// Nearest-Neighbor Fallback (Only builds if playing at 2x+ and no PNG was found)
+				if (!replaced && scaleFactor > 1) {
+					hdSurf = new Graphics::Surface();
+					hdSurf->create(expectedW, expectedH, Graphics::PixelFormat::createFormatCLUT8());
+					const byte *srcPx = (const byte *)_frames[i].surface.getPixels();
+					byte *dstPx = (byte *)hdSurf->getPixels();
+					for (int sy = 0; sy < expectedH; sy++) {
+						const byte *srcRow = srcPx + ((sy / scaleFactor) * _frames[i].surface.pitch);
+						byte *dstRow = dstPx + (sy * hdSurf->pitch);
+						for (int sx = 0; sx < expectedW; sx++) {
+							dstRow[sx] = srcRow[sx / scaleFactor];
 						}
-						g_hdSurfaces[key] = hdSurf;
 					}
+				}
+
+				// Add to Vault. If scale=1 and no PNG, hdSurf is nullptr. 
+				// This acts as a Negative Cache, ensuring we NEVER check the hard drive for this frame again!
+				g_hdSurfaces[key] = hdSurf;
+			}
+
+			// 3. APPLY TO GAME BRAIN (If playing at 1x)
+			// At 1x, the True Projector is off. We must push the custom PNG directly to the Game Brain to be visible.
+			if (scaleFactor == 1) {
+				Graphics::Surface *cachedSurf = g_hdSurfaces[key];
+				if (cachedSurf != nullptr) {
+					_frames[i].surface.copyFrom(*cachedSurf);
 				}
 			}
 		}
