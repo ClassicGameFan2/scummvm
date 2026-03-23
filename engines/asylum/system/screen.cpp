@@ -547,24 +547,29 @@ void Screen::bltFast(int16 dX, int16 dY, GraphicFrame *frame, Common::Rect *sour
 	else _backBuffer.copyRectToSurface(frame->surface, dX, dY, *source);
 }
 
-void Screen::copyToBackBuffer(const byte *buffer, int32 pitch, int16 x, int16 y, uint16 width, uint16 height, bool mirrored) {
+void Screen::copyToBackBuffer(const byte *buffer, int32 pitch, int16 x, int16 y, uint16 width, uint16 height, bool mirrored, bool isHD) {
 	if (!buffer || width == 0 || height == 0) return;
 
 	if (!mirrored) {
-		_backBuffer.copyRectToSurface(buffer, pitch, x, y, width, height);
+		if (isHD) {
+			_hdBackBuffer.copyRectToSurface(buffer, pitch, x, y, width, height);
+		} else {
+			_backBuffer.copyRectToSurface(buffer, pitch, x, y, width, height);
 
-		int scale = ASYLUM_SCALE_FACTOR;
-		if (scale > 1 && _backBuffer.w == LOGICAL_WIDTH) {
-			byte *hdDest = (byte *)_hdBackBuffer.getPixels();
-			int32 hdPitch = _hdBackBuffer.pitch; 
-			for (int sy = 0; sy < height; sy++) {
-				const byte *srcRow = buffer + (sy * pitch);
-				for (int S_y = 0; S_y < scale; S_y++) {
-					byte *dstRow = hdDest + (((y + sy) * scale + S_y) * hdPitch);
-					for (int sx = 0; sx < width; sx++) {
-						byte c = srcRow[sx];
-						for (int S_x = 0; S_x < scale; S_x++) {
-							dstRow[(x + sx) * scale + S_x] = c;
+			int scale = ASYLUM_SCALE_FACTOR;
+			// Dirty Rect Upscale: If drawing to the 1x buffer, instantly push to HD.
+			if (scale > 1 && _backBuffer.w == LOGICAL_WIDTH) {
+				byte *hdDest = (byte *)_hdBackBuffer.getPixels();
+				int32 hdPitch = _hdBackBuffer.pitch; 
+				for (int sy = 0; sy < height; sy++) {
+					const byte *srcRow = buffer + (sy * pitch);
+					for (int S_y = 0; S_y < scale; S_y++) {
+						byte *dstRow = hdDest + (((y + sy) * scale + S_y) * hdPitch);
+						for (int sx = 0; sx < width; sx++) {
+							byte c = srcRow[sx];
+							for (int S_x = 0; S_x < scale; S_x++) {
+								dstRow[(x + sx) * scale + S_x] = c;
+							}
 						}
 					}
 				}
@@ -575,30 +580,28 @@ void Screen::copyToBackBuffer(const byte *buffer, int32 pitch, int16 x, int16 y,
 	}
 }
 
-void Screen::copyToBackBufferWithTransparency(byte *buffer, int32 pitch, int16 x, int16 y, uint16 width, uint16 height, bool mirrored) {
-	byte *dest = (byte *)_backBuffer.getPixels();
+void Screen::copyToBackBufferWithTransparency(byte *buffer, int32 pitch, int16 x, int16 y, uint16 width, uint16 height, bool mirrored, bool isHD) {
+	Graphics::Surface *targetSurf = isHD ? &_hdBackBuffer : &_backBuffer;
+	byte *dest = (byte *)targetSurf->getPixels();
+	int32 dstPitch = targetSurf->pitch;
+	
 	int32 left = (x < 0) ? -x : 0;
 	int32 top = (y < 0) ? -y : 0;
 	
-	// DYNAMIC LIMITS: Because Screen::draw swaps _backBuffer to _hdBackBuffer, 
-	// this dynamically adapts to 1708 bounds! Max's pixels will never mangle or clip!
-	int32 bw = _backBuffer.w;
-	int32 bh = _backBuffer.h;
-	int32 bp = _backBuffer.pitch;
-
-	int32 right = (x + width > bw) ? bw - abs(x) : width;
-	int32 bottom = (y + height > bh) ? bh - abs(y) : height;
+	// DYNAMIC LIMITS: Safely allows Max to draw at massive 1708 bounds without clipping!
+	int32 right = (x + width > targetSurf->w) ? targetSurf->w - abs(x) : width;
+	int32 bottom = (y + height > targetSurf->h) ? targetSurf->h - abs(y) : height;
 
 	for (int32 curY = top; curY < bottom; curY++) {
 		for (int32 curX = left; curX < right; curX++) {
 			uint32 offset = (uint32)((mirrored ? right - (curX + 1) : curX) + curY * pitch);
-			if (buffer[offset] != 0) dest[x + curX + (y + curY) * bp] = buffer[offset];
+			if (buffer[offset] != 0) dest[x + curX + (y + curY) * dstPitch] = buffer[offset];
 		}
 	}
 	
 	// DIRTY RECT UPSCALE: Safely scale 1x UI components to the HD Buffer.
 	int scale = ASYLUM_SCALE_FACTOR;
-	if (scale > 1 && bw == LOGICAL_WIDTH) {
+	if (!isHD && scale > 1 && _backBuffer.w == LOGICAL_WIDTH) {
 		byte *hdDest = (byte *)_hdBackBuffer.getPixels();
 		int32 hdPitch = _hdBackBuffer.pitch;
 		for (int32 curY = top; curY < bottom; curY++) {
