@@ -225,40 +225,7 @@ void Screen::fillRect(int16 x, int16 y, int16 width, int16 height, uint32 color)
 void Screen::copyBackBufferToScreen() {
 	int S = ASYLUM_SCALE_FACTOR;
 	if (S > 1) {
-		// ULTRA-FAST SYNC LOOP: Eliminates the loading screen and video lag completely!
-		const byte *src = (const byte *)_backBuffer.getPixels();
-		byte *dst = (byte *)_hdBackBuffer.getPixels();
-		byte bgCol = _mainPalette[0];
-		int w = LOGICAL_WIDTH;
-		int h = LOGICAL_HEIGHT;
-		int pitch1 = _backBuffer.pitch;
-		int pitch2 = _hdBackBuffer.pitch;
-
-		for (int y = 0; y < h; y++) {
-			const byte *srcRow = src + (y * pitch1);
-			byte *dstRowBase = dst + ((y * S) * pitch2);
-			for (int x = 0; x < w; x++) {
-				byte c = srcRow[x];
-				// Skips background colors to preserve True Projector HD graphics
-				if (c > 0 && c != bgCol) {
-					if (S == 2) {
-						int dx = x * 2;
-						dstRowBase[dx] = c;
-						dstRowBase[dx + 1] = c;
-						dstRowBase[pitch2 + dx] = c;
-						dstRowBase[pitch2 + dx + 1] = c;
-					} else {
-						int dx = x * S;
-						for (int sy = 0; sy < S; sy++) {
-							byte *dstRow = dstRowBase + (sy * pitch2);
-							for (int sx = 0; sx < S; sx++) {
-								dstRow[dx + sx] = c;
-							}
-						}
-					}
-				}
-			}
-		}
+		// The True Projector is fully unleashed. Push the pristine HD buffer to the screen!
 		_vm->_system->copyRectToScreen((byte *)_hdBackBuffer.getPixels(), _hdBackBuffer.w, 0, 0, _hdBackBuffer.w, _hdBackBuffer.h);
 	} else {
 		_vm->_system->copyRectToScreen((byte *)_backBuffer.getPixels(), _backBuffer.w, 0, 0, _backBuffer.w, _backBuffer.h);
@@ -583,35 +550,74 @@ void Screen::bltFast(int16 dX, int16 dY, GraphicFrame *frame, Common::Rect *sour
 
 void Screen::copyToBackBuffer(const byte *buffer, int32 pitch, int16 x, int16 y, uint16 width, uint16 height, bool mirrored, bool isHD) {
 	if (!buffer || width == 0 || height == 0) return;
-	
+
 	if (!mirrored) {
-		if (isHD) _hdBackBuffer.copyRectToSurface(buffer, pitch, x, y, width, height);
-		else _backBuffer.copyRectToSurface(buffer, pitch, x, y, width, height);
+		if (isHD) {
+			_hdBackBuffer.copyRectToSurface(buffer, pitch, x, y, width, height);
+		} else {
+			_backBuffer.copyRectToSurface(buffer, pitch, x, y, width, height);
+			
+			int scale = ASYLUM_SCALE_FACTOR;
+			// Dirty Rect Upscale: If drawing to the 1x buffer, instantly push to HD.
+			if (scale > 1 && _backBuffer.w == LOGICAL_WIDTH) {
+				byte *hdDest = (byte *)_hdBackBuffer.getPixels();
+				int32 hdPitch = _hdBackBuffer.pitch; 
+				for (int sy = 0; sy < height; sy++) {
+					const byte *srcRow = buffer + (sy * pitch);
+					for (int S_y = 0; S_y < scale; S_y++) {
+						byte *dstRow = hdDest + (((y + sy) * scale + S_y) * hdPitch);
+						for (int sx = 0; sx < width; sx++) {
+							byte c = srcRow[sx];
+							for (int S_x = 0; S_x < scale; S_x++) {
+								dstRow[(x + sx) * scale + S_x] = c;
+							}
+						}
+					}
+				}
+			}
+		}
 	} else {
 		error("[Screen::copyToBackBuffer] Mirrored drawing not implemented");
 	}
 }
 
 void Screen::copyToBackBufferWithTransparency(byte *buffer, int32 pitch, int16 x, int16 y, uint16 width, uint16 height, bool mirrored, bool isHD) {
+	Graphics::Surface *targetSurf = isHD ? &_hdBackBuffer : &_backBuffer;
+	byte *dest = (byte *)targetSurf->getPixels();
+	int32 dstPitch = targetSurf->pitch;
+	
 	int32 left = (x < 0) ? -x : 0;
 	int32 top = (y < 0) ? -y : 0;
-	int32 right = (x + width > (isHD ? ASYLUM_SCREEN_WIDTH : LOGICAL_WIDTH)) ? (isHD ? ASYLUM_SCREEN_WIDTH : LOGICAL_WIDTH) - abs(x) : width;
-	int32 bottom = (y + height > (isHD ? ASYLUM_SCREEN_HEIGHT : LOGICAL_HEIGHT)) ? (isHD ? ASYLUM_SCREEN_HEIGHT : LOGICAL_HEIGHT) - abs(y) : height;
+	
+	// DYNAMIC CLIPPING: Safely allows Max to draw at massive 1708 bounds without hitting an invisible wall!
+	int32 right = (x + width > targetSurf->w) ? targetSurf->w - abs(x) : width;
+	int32 bottom = (y + height > targetSurf->h) ? targetSurf->h - abs(y) : height;
 
-	if (isHD) {
-		byte *dest = (byte *)_hdBackBuffer.getPixels();
-		for (int32 curY = top; curY < bottom; curY++) {
-			for (int32 curX = left; curX < right; curX++) {
-				uint32 offset = (uint32)((mirrored ? right - (curX + 1) : curX) + curY * pitch);
-				if (buffer[offset] != 0) dest[x + curX + (y + curY) * _hdBackBuffer.pitch] = buffer[offset];
+	for (int32 curY = top; curY < bottom; curY++) {
+		for (int32 curX = left; curX < right; curX++) {
+			uint32 offset = (uint32)((mirrored ? right - (curX + 1) : curX) + curY * pitch);
+			if (buffer[offset] != 0) {
+				dest[x + curX + (y + curY) * dstPitch] = buffer[offset];
 			}
 		}
-	} else {
-		byte *dest = (byte *)_backBuffer.getPixels();
+	}
+
+	// TEXT & UI UPSCALER: Catch 1x transparent text elements and scale them seamlessly to the HD buffer.
+	int scale = ASYLUM_SCALE_FACTOR;
+	if (!isHD && scale > 1 && targetSurf->w == LOGICAL_WIDTH) {
+		byte *hdDest = (byte *)_hdBackBuffer.getPixels();
+		int32 hdPitch = _hdBackBuffer.pitch;
 		for (int32 curY = top; curY < bottom; curY++) {
 			for (int32 curX = left; curX < right; curX++) {
 				uint32 offset = (uint32)((mirrored ? right - (curX + 1) : curX) + curY * pitch);
-				if (buffer[offset] != 0) dest[x + curX + (y + curY) * _backBuffer.pitch] = buffer[offset];
+				byte c = buffer[offset];
+				if (c != 0) {
+					for (int sy = 0; sy < scale; sy++) {
+						for (int sx = 0; sx < scale; sx++) {
+							hdDest[(x + curX) * scale + sx + ((y + curY) * scale + sy) * hdPitch] = c;
+						}
+					}
+				}
 			}
 		}
 	}
