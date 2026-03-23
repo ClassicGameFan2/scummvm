@@ -91,20 +91,15 @@ void Screen::draw(GraphicResource *resource, uint32 frameIndex, const Common::Po
 	if (!src.isValidRect()) return;
 	_useColorKey = colorKey;
 
-	// --- 1. DRAW EXACT 1x TO GAME BRAIN ---
+	// 1. DRAW 1x TO GAME BRAIN
 	if (masked) blitMasked(frame, &src, resourceMask->data + 8, &srcMask, &destMask, (uint16)resourceMask->getData(4), &dest, flags);
 	else blit(frame, &src, &dest, flags);
 
-	// --- 2. ISOLATED HD PROJECTOR DRAW ---
+	// 2. ISOLATED HD PROJECTOR DRAW
 	int S = ASYLUM_SCALE_FACTOR;
 	if (S > 1) {
 		Graphics::Surface *hdSurf = getHDSurface(resource->getResourceId(), frameIndex);
 		if (hdSurf) {
-			// Calculate HD Target Boundaries
-			Common::Rect hdSrc(src.left * S, src.top * S, src.right * S, src.bottom * S);
-			Common::Rect hdDest(dest.left * S, dest.top * S, dest.right * S, dest.bottom * S);
-			
-			// Temporarily swap surfaces to use the engine's internal blitter!
 			Graphics::Surface tmpBack = _backBuffer;
 			_backBuffer = _hdBackBuffer;
 			
@@ -113,8 +108,10 @@ void Screen::draw(GraphicResource *resource, uint32 frameIndex, const Common::Po
 			hdFrame.x = frame->x * S;
 			hdFrame.y = frame->y * S;
 
+			Common::Rect hdSrc(src.left * S, src.top * S, src.right * S, src.bottom * S);
+			Common::Rect hdDest(dest.left * S, dest.top * S, dest.right * S, dest.bottom * S);
+
 			if (masked) {
-				// SAFE HD MASK LOOP
 				byte *frameBuffer = (byte *)hdFrame.surface.getPixels();
 				byte *mirroredBuffer = nullptr;
 				int16 frameRight = hdFrame.surface.pitch;
@@ -128,57 +125,56 @@ void Screen::draw(GraphicResource *resource, uint32 frameIndex, const Common::Po
 					hdSrc.left = 0;
 				}
 
-				// Find intersection of the HD Dest and the 1x scaled Mask limits
-				Common::Rect hdDestMask(destMask.left * S, destMask.top * S, destMask.right * S, destMask.bottom * S);
-				Common::Rect intersect = hdDest;
-				intersect.clip(hdDestMask);
+				int h1x = src.height();
+				int w1x = src.width();
+				byte *maskData = resourceMask->data + 8;
+				uint16 mWidth1x = (uint16)resourceMask->getData(4);
 
-				if (!intersect.isEmpty()) {
-					int startY = (intersect.top - hdDest.top) / S;
-					int startX = (intersect.left - hdDest.left) / S;
-					int h1x = intersect.height() / S;
-					int w1x = intersect.width() / S;
+				byte *hdFrameBase = frameBuffer + hdSrc.top * frameRight + hdSrc.left;
+				byte *hdDestBase = (byte *)_backBuffer.getPixels() + dest.top * S * _backBuffer.pitch + dest.left * S;
+				int32 hdPitch = _backBuffer.pitch;
 
-					int maskOffsetX = (intersect.left - hdDestMask.left) / S;
-					int maskOffsetY = (intersect.top - hdDestMask.top) / S;
-					uint16 mWidth1x = (uint16)resourceMask->getData(4);
+				// FULL FRAME MASK LOOP: Draws all of Max, cutting out ONLY the masked pixels!
+				for (int16 y = 0; y < h1x; y++) {
+					int screenY = dest.top + y;
+					bool inMaskY = (screenY >= destMask.top && screenY < destMask.bottom);
+					int maskY = inMaskY ? (srcMask.top + (screenY - destMask.top)) : 0;
 
-					byte nSkippedBits = (srcMask.left + maskOffsetX) % 8;
-					byte *maskBase = resourceMask->data + 8 + (srcMask.top + maskOffsetY) * (mWidth1x / 8) + (srcMask.left + maskOffsetX) / 8;
-					
-					byte *hdFramePtr = frameBuffer + (hdSrc.top + startY * S) * frameRight + (hdSrc.left + startX * S);
-					byte *hdDestPtr = (byte *)_backBuffer.getPixels() + intersect.top * _backBuffer.pitch + intersect.left;
+					byte *hdSrcRow = hdFrameBase + (y * S * frameRight);
+					byte *hdDstRow = hdDestBase + (y * S * hdPitch);
 
-					for (int16 y = 0; y < h1x; y++) {
-						byte *dstRow = hdDestPtr + (y * S * _backBuffer.pitch);
-						byte *srcRow = hdFramePtr + (y * S * frameRight);
-						byte *maskPtr = maskBase + (y * (mWidth1x / 8));
-						
-						int run = 7 - nSkippedBits;
-						uint skip = *maskPtr >> nSkippedBits;
+					for (int16 x = 0; x < w1x; x++) {
+						bool skip = false;
+						if (inMaskY) {
+							int screenX = dest.left + x;
+							if (screenX >= destMask.left && screenX < destMask.right) {
+								int maskX = srcMask.left + (screenX - destMask.left);
+								byte mByte = maskData[maskY * (mWidth1x / 8) + (maskX / 8)];
+								// If the bit is 1, the foreground object is here. Skip drawing Max!
+								if ((mByte >> (maskX % 8)) & 1) {
+									skip = true;
+								}
+							}
+						}
 
-						for (int16 x = 0; x < w1x; x++) {
-							if (!(skip & 1)) {
-								for (int sy = 0; sy < S; sy++) {
-									for (int sx = 0; sx < S; sx++) {
-										byte c = srcRow[(sy * frameRight) + (x * S) + sx];
-										if (c) dstRow[(sy * _backBuffer.pitch) + (x * S) + sx] = c;
+						if (!skip) {
+							for (int sy = 0; sy < S; sy++) {
+								for (int sx = 0; sx < S; sx++) {
+									byte c = hdSrcRow[(sy * frameRight) + (x * S) + sx];
+									if (c) {
+										hdDstRow[(sy * hdPitch) + (x * S) + sx] = c;
 									}
 								}
 							}
-							if (x == w1x - 1) break;
-							run--;
-							if (run < 0) { maskPtr++; run = 7; skip = *maskPtr; }
-							else skip >>= 1;
 						}
 					}
 				}
+				
 				if (mirroredBuffer) free(mirroredBuffer);
 			} else {
 				blit(&hdFrame, &hdSrc, &hdDest, flags);
 			}
-			
-			_backBuffer = tmpBack; // Restore 1x Engine
+			_backBuffer = tmpBack;
 		}
 	}
 }
