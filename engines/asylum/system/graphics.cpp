@@ -39,6 +39,7 @@ namespace Asylum {
 // --- GLOBAL HD DICTIONARY (THE VAULT) ---
 // This vault is completely hidden from the 1x Game Brain!
 static Common::HashMap<uint32, Graphics::Surface *> g_hdSurfaces;
+static Common::HashMap<uint32, bool> g_moddedObjectsCache; // STOPS HARD DRIVE LAG
 
 Graphics::Surface *getHDSurface(uint32 resourceId, uint32 frameIndex) {
 	uint32 key = (resourceId << 8) | (frameIndex & 0xFF);
@@ -132,15 +133,19 @@ void GraphicResource::init(byte *data, int32 size) {
 
 	// SMART I/O OPTIMIZER: Only check the hard drive if we know this object has modded frames!
 	// This prevents the engine from scanning the HDD 2000+ times when a menu opens, killing the lag completely.
+	// Cache the hard drive check so we only ask the OS once!
 	bool isModdedObject = false;
 	if (doReplace) {
-		Common::String checkName = Common::String::format("SanitariumHDPack/RES%03d/obj_%u_f0.png", packId, _resourceId);
-		Common::Path checkPath(checkName);
-		if (Common::FSNode(checkPath).exists()) {
-			isModdedObject = true;
+		if (g_moddedObjectsCache.contains(_resourceId)) {
+			isModdedObject = g_moddedObjectsCache[_resourceId];
+		} else {
+			Common::String checkName = Common::String::format("SanitariumHDPack/RES%03d/obj_%u_f0.png", packId, _resourceId);
+			Common::Path checkPath(checkName);
+			isModdedObject = Common::FSNode(checkPath).exists();
+			g_moddedObjectsCache[_resourceId] = isModdedObject; // Remember for next time!
 		}
 	}
-
+	
 	dataPtr = data;
 
 	for (uint32 i = 0; i < frameCount; i++) {
