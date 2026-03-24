@@ -35,6 +35,9 @@
 
 namespace Asylum {
 
+// Required for HD resolution upscaling
+#define LOGICAL_MOUSE(pt) Common::Point((pt).x / ASYLUM_SCALE_FACTOR, (pt).y / ASYLUM_SCALE_FACTOR)
+
 PuzzleVCR::PuzzleVCR(AsylumEngine *engine): Puzzle(engine) {
 	// reset all states
 	memset(&_jacksState,   0, sizeof(_jacksState));
@@ -89,6 +92,9 @@ bool PuzzleVCR::mouseLeftDown(const AsylumEvent &evt) {
 	if (_isAccomplished)
 		return true;
 
+	// WIDESCREEN FIX: Scale the mouse down to 1x to hit the VCR buttons and jacks!
+	Common::Point mousePos = LOGICAL_MOUSE(evt.mouse);
+
 	//////////////////////////////////////////////////////////////////////////
 	// Plug-in jacks
 	//////////////////////////////////////////////////////////////////////////
@@ -100,11 +106,11 @@ bool PuzzleVCR::mouseLeftDown(const AsylumEvent &evt) {
 			state = (_jacksState[kYellow] != kOnHand) ? kOnTable : kPluggedOnBlack;
 	}
 
-	if (inPolygon(evt.mouse, kRedHole)) {
+	if (inPolygon(mousePos, kRedHole)) {
 		setJackOnHole(kBlack, state, kPluggedOnRed);
-	} else if (inPolygon(evt.mouse, kYellowHole)) {
+	} else if (inPolygon(mousePos, kYellowHole)) {
 		setJackOnHole(kRed, state, kPluggedOnYellow);
-	} else if (inPolygon(evt.mouse, kBlackHole)) {
+	} else if (inPolygon(mousePos, kBlackHole)) {
 		setJackOnHole(kYellow, state, kPluggedOnBlack);
 
 		if (_holesState[kYellow] != kPluggedOnYellow && _buttonsState[kPowerButton] == kON) {
@@ -120,8 +126,8 @@ bool PuzzleVCR::mouseLeftDown(const AsylumEvent &evt) {
 	//////////////////////////////////////////////////////////////////////////
 	Color jack = getJackOnHand();
 	if (jack != kNone) {
-		if (evt.mouse.x >= (int32)puzzleVCRPolygons[kBlackJack][0] && evt.mouse.x <= (int32)puzzleVCRPolygons[kYellowJack][2]
-		 && evt.mouse.y >= (int32)puzzleVCRPolygons[kBlackJack][1] && evt.mouse.y <= (int32)puzzleVCRPolygons[kYellowJack][3]) {
+		if (mousePos.x >= (int32)puzzleVCRPolygons[kBlackJack][0] && mousePos.x <= (int32)puzzleVCRPolygons[kYellowJack][2]
+		 && mousePos.y >= (int32)puzzleVCRPolygons[kBlackJack][1] && mousePos.y <= (int32)puzzleVCRPolygons[kYellowJack][3]) {
 
 			_jacksState[jack] = kOnTable;
 			getSound()->playSound(getWorld()->graphicResourceIds[50]);
@@ -139,17 +145,17 @@ bool PuzzleVCR::mouseLeftDown(const AsylumEvent &evt) {
 	getSharedData()->setFlag(kFlag1, false);
 
 
-	if (inPolygon(evt.mouse, kBlackJack))
+	if (inPolygon(mousePos, kBlackJack))
 		pickJack(kBlack);
-	else if (inPolygon(evt.mouse, kRedJack))
+	else if (inPolygon(mousePos, kRedJack))
 		pickJack(kRed);
-	else if (inPolygon(evt.mouse, kYellowJack))
+	else if (inPolygon(mousePos, kYellowJack))
 		pickJack(kYellow);
 
 	//////////////////////////////////////////////////////////////////////////
 	// VCR button regions
 	//////////////////////////////////////////////////////////////////////////
-	if (inPolygon(evt.mouse, kRewindButton)) {
+	if (inPolygon(mousePos, kRewindButton)) {
 		getSound()->playSound(getWorld()->graphicResourceIds[39]);
 
 		if (!_buttonsState[kRewindButton])
@@ -157,7 +163,7 @@ bool PuzzleVCR::mouseLeftDown(const AsylumEvent &evt) {
 		else if (_buttonsState[kRewindButton] == kON)
 			_buttonsState[kRewindButton] = kDownOFF;
 
-	} else if (inPolygon(evt.mouse, kPlayButton)) {
+	} else if (inPolygon(mousePos, kPlayButton)) {
 		getSound()->playSound(getWorld()->graphicResourceIds[39]);
 
 		if (!_buttonsState[kPlayButton])
@@ -165,7 +171,7 @@ bool PuzzleVCR::mouseLeftDown(const AsylumEvent &evt) {
 		else if (_buttonsState[kPlayButton] == kON)
 			_buttonsState[kPlayButton] = kDownOFF;
 
-	} else if (inPolygon(evt.mouse, kStopButton)) {
+	} else if (inPolygon(mousePos, kStopButton)) {
 		getSound()->playSound(getWorld()->graphicResourceIds[39]);
 
 		if (!_buttonsState[kStopButton])
@@ -173,7 +179,7 @@ bool PuzzleVCR::mouseLeftDown(const AsylumEvent &evt) {
 		else if (_buttonsState[kStopButton] == kON)
 			_buttonsState[kStopButton] = kDownOFF;
 
-	} else if (inPolygon(evt.mouse, kPowerButton)) {
+	} else if (inPolygon(mousePos, kPowerButton)) {
 		getSound()->playSound(getWorld()->graphicResourceIds[39]);
 
 		if (!_buttonsState[kPowerButton] && _holesState[kYellow] == kPluggedOnRed) {
@@ -323,7 +329,8 @@ void PuzzleVCR::updateScreen() {
 
 void PuzzleVCR::updateCursor() {
 	Color jack = getJackOnHand();
-	Common::Point mousePos = getCursor()->position();
+	// WIDESCREEN FIX: Scale mouse down to 1x to hit hover zones
+	Common::Point mousePos = LOGICAL_MOUSE(getCursor()->position());
 
 	if (mousePos.x)
 		mousePos.x = 465;
