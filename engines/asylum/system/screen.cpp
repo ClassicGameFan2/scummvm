@@ -91,6 +91,15 @@ void Screen::draw(GraphicResource *resource, uint32 frameIndex, const Common::Po
 	if (!src.isValidRect()) return;
 	_useColorKey = colorKey;
 
+	// --- PRESERVE ORIGINAL RECTS BEFORE MUTATION ---
+	// The 1x Game Brain permanently distorts these rectangles during blitMasked. 
+	// We save them here so the True Projector can use pure math!
+	Common::Rect origSrc = src;
+	Common::Rect origDest = dest;
+	Common::Rect origSrcMask = srcMask;
+	Common::Rect origDestMask = destMask;
+	// -----------------------------------------------
+
 	// 1. DRAW 1x TO GAME BRAIN
 	if (masked) blitMasked(frame, &src, resourceMask->data + 8, &srcMask, &destMask, (uint16)resourceMask->getData(4), &dest, flags);
 	else blit(frame, &src, &dest, flags);
@@ -108,8 +117,9 @@ void Screen::draw(GraphicResource *resource, uint32 frameIndex, const Common::Po
 			hdFrame.x = frame->x * S;
 			hdFrame.y = frame->y * S;
 
-			Common::Rect hdSrc(src.left * S, src.top * S, src.right * S, src.bottom * S);
-			Common::Rect hdDest(dest.left * S, dest.top * S, dest.right * S, dest.bottom * S);
+			// Use the UN-MUTATED rectangles to calculate HD bounds!
+			Common::Rect hdSrc(origSrc.left * S, origSrc.top * S, origSrc.right * S, origSrc.bottom * S);
+			Common::Rect hdDest(origDest.left * S, origDest.top * S, origDest.right * S, origDest.bottom * S);
 
 			if (masked) {
 				byte *frameBuffer = (byte *)hdFrame.surface.getPixels();
@@ -125,20 +135,20 @@ void Screen::draw(GraphicResource *resource, uint32 frameIndex, const Common::Po
 					hdSrc.left = 0;
 				}
 
-				int h1x = src.height();
-				int w1x = src.width();
+				int h1x = origSrc.height();
+				int w1x = origSrc.width();
 				byte *maskData = resourceMask->data + 8;
 				uint16 mWidth1x = (uint16)resourceMask->getData(4);
 
 				byte *hdFrameBase = frameBuffer + hdSrc.top * frameRight + hdSrc.left;
-				byte *hdDestBase = (byte *)_backBuffer.getPixels() + dest.top * S * _backBuffer.pitch + dest.left * S;
+				byte *hdDestBase = (byte *)_backBuffer.getPixels() + origDest.top * S * _backBuffer.pitch + origDest.left * S;
 				int32 hdPitch = _backBuffer.pitch;
 
-				// FULL FRAME MASK LOOP: Draws all of Max, cutting out ONLY the masked pixels!
+				// FULL FRAME MASK LOOP
 				for (int16 y = 0; y < h1x; y++) {
-					int screenY = dest.top + y;
-					bool inMaskY = (screenY >= destMask.top && screenY < destMask.bottom);
-					int maskY = inMaskY ? (srcMask.top + (screenY - destMask.top)) : 0;
+					int screenY = origDest.top + y;
+					bool inMaskY = (screenY >= origDestMask.top && screenY < origDestMask.bottom);
+					int maskY = inMaskY ? (origSrcMask.top + (screenY - origDestMask.top)) : 0;
 
 					byte *hdSrcRow = hdFrameBase + (y * S * frameRight);
 					byte *hdDstRow = hdDestBase + (y * S * hdPitch);
@@ -146,11 +156,11 @@ void Screen::draw(GraphicResource *resource, uint32 frameIndex, const Common::Po
 					for (int16 x = 0; x < w1x; x++) {
 						bool skip = false;
 						if (inMaskY) {
-							int screenX = dest.left + x;
-							if (screenX >= destMask.left && screenX < destMask.right) {
-								int maskX = srcMask.left + (screenX - destMask.left);
+							int screenX = origDest.left + x;
+							if (screenX >= origDestMask.left && screenX < origDestMask.right) {
+								int maskX = origSrcMask.left + (screenX - origDestMask.left);
 								byte mByte = maskData[maskY * (mWidth1x / 8) + (maskX / 8)];
-								// If the bit is 1, the foreground object is here. Skip drawing Max!
+								// If the bit is 1, the foreground object is in front. Skip drawing Max!
 								if ((mByte >> (maskX % 8)) & 1) {
 									skip = true;
 								}
@@ -169,7 +179,6 @@ void Screen::draw(GraphicResource *resource, uint32 frameIndex, const Common::Po
 						}
 					}
 				}
-				
 				if (mirroredBuffer) free(mirroredBuffer);
 			} else {
 				blit(&hdFrame, &hdSrc, &hdDest, flags);
