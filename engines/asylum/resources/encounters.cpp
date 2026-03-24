@@ -41,6 +41,9 @@
 
 namespace Asylum {
 
+// Required for HD mod
+#define LOGICAL_MOUSE(pt) Common::Point((pt).x / ASYLUM_SCALE_FACTOR, (pt).y / ASYLUM_SCALE_FACTOR)
+
 #define KEYWORD_MASK 0xFFF
 
 #define OPCODE_NAME(index) (index > 25 ? "INVALID" : opcodeNames[index])
@@ -598,7 +601,8 @@ uint32 Encounter::findKeyword(EncounterItem *item, int16 keyword) const {
 }
 
 int32 Encounter::getKeywordIndex() {
-	Common::Point mousePos = getCursor()->position();
+	// WIDESCREEN FIX: Scale mouse down to 1x to hit dialogue text boxes!
+	Common::Point mousePos = LOGICAL_MOUSE(getCursor()->position());
 
 	int16 counter = 0;
 	for (uint i = _keywordStartIndex; i < ARRAYSIZE(_keywordIndexes); i++) {
@@ -1338,7 +1342,8 @@ void Encounter::setupEntities(bool type4) {
 }
 
 int32 Encounter::findRect() {
-	Common::Point mousePos = getCursor()->position();
+	// WIDESCREEN FIX: Scale mouse down to 1x to hit dialogue scroll arrows!
+	Common::Point mousePos = LOGICAL_MOUSE(getCursor()->position());
 
 	for (uint32 i = 0; i < ARRAYSIZE(_drawingStructs); i++) {
 		EncounterDrawingStruct *drawStruct = &_drawingStructs[i];
