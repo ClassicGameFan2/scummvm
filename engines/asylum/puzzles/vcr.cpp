@@ -332,9 +332,6 @@ void PuzzleVCR::updateCursor() {
 	// WIDESCREEN FIX: Scale mouse down to 1x to hit hover zones
 	Common::Point mousePos = LOGICAL_MOUSE(getCursor()->position());
 
-	if (mousePos.x)
-		mousePos.x = 465;
-
 	if (jack == kNone) {
 		if (inPolygon(mousePos, kRewindButton)
 		 || inPolygon(mousePos, kStopButton)
@@ -364,7 +361,9 @@ void PuzzleVCR::updateCursor() {
 //////////////////////////////////////////////////////////////////////////
 void PuzzleVCR::updateJack(Color jack, const VCRDrawInfo &onTable, const VCRDrawInfo &pluggedOnRed, const VCRDrawInfo &pluggedOnYellow, const VCRDrawInfo &pluggedOnBlack, int32 resourceOnHandIndex) {
 	GraphicQueueItem item;
-	Common::Point mousePos = getCursor()->position();
+	
+	// WIDESCREEN FIX: Scale mouse down to 1x so the Jack visuals draw correctly!
+	Common::Point mousePos = LOGICAL_MOUSE(getCursor()->position());
 
 	switch (_jacksState[jack]) {
 	default:
